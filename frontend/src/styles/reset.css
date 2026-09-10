@@ -1,0 +1,94 @@
+/* Reset mínimo. Não remove marcador de lista globalmente: `list-style: none` sem
+   `role="list"` apaga a semântica de lista no VoiceOver — quem remove, declara. */
+
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body,
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  figure,
+  blockquote,
+  dl,
+  dd {
+    margin: 0;
+  }
+
+  ul[role="list"],
+  ol[role="list"] {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  body {
+    min-block-size: 100dvh;
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  img,
+  picture,
+  svg,
+  video,
+  canvas {
+    display: block;
+    max-inline-size: 100%;
+  }
+
+  input,
+  button,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+
+  fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    min-inline-size: 0;
+  }
+
+  legend {
+    padding: 0;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  :target {
+    scroll-margin-block-start: var(--space-6);
+  }
+}

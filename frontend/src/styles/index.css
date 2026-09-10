@@ -1,0 +1,7 @@
+/* Ordem das camadas fixada antes de qualquer import: um módulo CSS nunca
+   perde para o reset, e o reset nunca perde para os tokens. */
+@layer reset, tokens, base, components, utilities;
+
+@import "./reset.css";
+@import "./tokens.css";
+@import "./base.css";

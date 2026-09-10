@@ -1,0 +1,17 @@
+Fontes deste diretório
+======================
+
+Fraunces
+  Copyright (c) The Fraunces Project Authors (https://github.com/undercasetype/Fraunces)
+  Licença: SIL Open Font License, Version 1.1
+  https://openfontlicense.org
+
+Public Sans
+  Copyright (c) The Public Sans Project Authors (https://github.com/uswds/public-sans)
+  Licença: SIL Open Font License, Version 1.1
+  https://openfontlicense.org
+
+Ambas as licenças permitem uso, redistribuição e hospedagem própria (self-hosting),
+inclusive comercial, desde que o aviso de copyright e a licença sejam mantidos e
+as fontes não sejam vendidas isoladamente. Os arquivos .woff2 aqui são os subsets
+latin e latin-ext servidos pelo Google Fonts.

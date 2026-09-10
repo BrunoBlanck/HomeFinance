@@ -1,0 +1,107 @@
+@layer components {
+  .page {
+    min-block-size: 100dvh;
+    background-color: var(--bg);
+  }
+
+  .body {
+    max-inline-size: 1120px;
+    margin-inline: auto;
+    padding: var(--space-6) var(--space-4) var(--space-8);
+  }
+
+  .flash {
+    margin-block-end: var(--space-5);
+  }
+
+  .greeting {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-block-end: var(--space-6);
+  }
+
+  .title {
+    font-family: var(--font-display);
+    font-size: var(--text-28);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .date {
+    font-size: var(--text-15);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-muted);
+  }
+
+  .grid {
+    display: grid;
+    gap: var(--space-6);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (min-width: 900px) {
+    .grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+      align-items: start;
+    }
+  }
+
+  .panelTitle {
+    font-family: var(--font-display);
+    font-size: var(--text-22);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .panelText {
+    margin-block-start: var(--space-3);
+    max-inline-size: 60ch;
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  .preview {
+    margin-block-start: var(--space-5);
+  }
+
+  .listTitle {
+    font-size: var(--text-13);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  .listTitle + .list {
+    margin-block-start: var(--space-2);
+  }
+
+  .list + .listTitle {
+    margin-block-start: var(--space-5);
+  }
+
+  .list li {
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: var(--space-2);
+    align-items: start;
+  }
+
+  .list svg {
+    margin-block-start: 3px;
+    color: var(--accent);
+  }
+
+  .list[data-tone="next"] svg {
+    color: var(--ink-muted);
+  }
+}

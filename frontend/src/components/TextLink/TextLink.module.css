@@ -1,0 +1,17 @@
+@layer components {
+  .link {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    border-radius: 2px;
+    transition: color var(--motion-fast) var(--ease);
+  }
+
+  @media (hover: hover) {
+    .link:hover {
+      color: var(--ink);
+    }
+  }
+}

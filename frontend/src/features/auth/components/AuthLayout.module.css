@@ -1,0 +1,181 @@
+@layer components {
+  /* Abaixo de 1024px o caderno se desdobra: barra com a marca, a folha, e a
+     capa virando rodapé miúdo. */
+  .shell {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "top"
+      "sheet"
+      "tagline"
+      "note";
+    grid-template-rows: 56px 1fr auto auto;
+    min-block-size: 100dvh;
+  }
+
+  .coverTop {
+    grid-area: top;
+    display: flex;
+    align-items: center;
+    padding-inline: var(--space-4);
+  }
+
+  .logoLarge {
+    display: none;
+  }
+
+  .logoSmall {
+    display: inline-flex;
+  }
+
+  .tagline {
+    grid-area: tagline;
+    padding: var(--space-5) var(--space-4) 0;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .coverNote {
+    grid-area: note;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4) var(--space-5);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    max-inline-size: 46ch;
+  }
+
+  /* A folha. Conteúdo colado no topo e à esquerda: quem escreve num caderno
+     começa na primeira linha, não no meio da página. */
+  .sheet {
+    grid-area: sheet;
+    position: relative;
+    background-color: var(--surface);
+    border-block-start: 1px solid var(--border);
+    min-block-size: calc(100dvh - 56px);
+    padding-block: var(--space-8) var(--space-7);
+    padding-inline: clamp(var(--space-5), 6vw, 88px);
+  }
+
+  /* A margem do caderno. Some quando a tela fica estreita demais para ela. */
+  .sheet::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inline-size: 1px;
+    inset-inline-start: clamp(16px, 4vw, 56px);
+    background-color: var(--border);
+  }
+
+  @media (max-width: 719px) {
+    .sheet::before {
+      display: none;
+    }
+  }
+
+  .sheetInner {
+    max-inline-size: 42ch;
+    view-transition-name: auth-sheet;
+  }
+
+  /* Cabeçalho de página de livro-razão: seção à esquerda, etapa à direita. */
+  .pageHead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding-block-end: var(--space-2);
+    margin-block-end: var(--space-5);
+    border-block-end: 1px solid var(--border);
+    font-size: var(--text-13);
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .step {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .title {
+    font-family: var(--font-display);
+    font-size: clamp(1.375rem, 1.15rem + 1.1vw, 1.75rem);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .intro {
+    margin-block-start: var(--space-2);
+    max-inline-size: 46ch;
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+
+    & strong {
+      font-weight: 600;
+      color: var(--ink);
+    }
+  }
+
+  .notice {
+    margin-block-start: var(--space-5);
+  }
+
+  .footer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-block-start: var(--space-6);
+    padding-block-start: var(--space-4);
+    border-block-start: 1px solid var(--border);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  @media (min-width: 1024px) {
+    .shell {
+      grid-template-columns: minmax(280px, 34fr) minmax(0, 66fr);
+      grid-template-areas:
+        "top sheet"
+        "tagline sheet"
+        "note sheet";
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .coverTop {
+      padding: var(--space-7) var(--space-7) 0;
+    }
+
+    .logoLarge {
+      display: inline-flex;
+    }
+
+    .logoSmall {
+      display: none;
+    }
+
+    .tagline {
+      align-self: center;
+      padding: var(--space-6) var(--space-7);
+      max-inline-size: 20ch;
+      font-family: var(--font-display);
+      font-size: var(--text-22);
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .coverNote {
+      padding: 0 var(--space-7) var(--space-7);
+      max-inline-size: 34ch;
+    }
+
+    .sheet {
+      border-block-start: none;
+      border-inline-start: 1px solid var(--border);
+      min-block-size: 100dvh;
+    }
+  }
+}

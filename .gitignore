@@ -1,0 +1,36 @@
+# Segredos e configuração local — NUNCA versionar
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Go
+backend/bin/
+backend/tmp/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+*.log
+
+# Bancos locais
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / SO
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Claude Code (configuração local do usuário)
+.claude/settings.local.json

@@ -1,0 +1,44 @@
+@layer components {
+  .wrap {
+    display: inline-flex;
+    flex: none;
+
+    &[data-size="sm"] {
+      --spinner-size: 1rem;
+    }
+
+    &[data-size="md"] {
+      --spinner-size: 1.5rem;
+    }
+  }
+
+  .spinner {
+    inline-size: var(--spinner-size);
+    block-size: var(--spinner-size);
+    animation: hf-spin 900ms linear infinite;
+  }
+
+  @keyframes hf-spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  /* Sem rotação para quem pediu menos movimento: a espera vira respiração. */
+  @keyframes hf-breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.35;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spinner {
+      animation: hf-breathe 1400ms ease-in-out infinite;
+    }
+  }
+}

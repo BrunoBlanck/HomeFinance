@@ -1,0 +1,74 @@
+@layer components {
+  .panel {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    /* Regra dura do design system. Não remova. */
+    box-shadow: none;
+
+    &[data-tone="sunken"] {
+      background-color: var(--surface-sunken);
+      border-color: transparent;
+    }
+
+    &[data-padding="none"] {
+      --panel-pad: 0px;
+    }
+
+    &[data-padding="md"] {
+      --panel-pad: var(--space-4);
+    }
+
+    &[data-padding="lg"] {
+      --panel-pad: var(--space-6);
+    }
+  }
+
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--panel-pad) var(--panel-pad) 0;
+  }
+
+  .heading {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-inline-size: 0;
+  }
+
+  .title {
+    font-family: var(--font-display);
+    font-size: var(--text-18);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .subtitle {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .actions {
+    flex: none;
+  }
+
+  .body {
+    padding: var(--panel-pad);
+  }
+
+  .head + .body {
+    padding-block-start: var(--space-4);
+  }
+
+  .footer {
+    padding: var(--space-3) var(--panel-pad);
+    border-block-start: 1px solid var(--border);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+}

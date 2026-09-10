@@ -1,0 +1,7 @@
+@layer components {
+  .countdown {
+    font-size: var(--text-13);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-muted);
+  }
+}

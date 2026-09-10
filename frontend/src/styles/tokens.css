@@ -1,0 +1,100 @@
+/* Tokens do HomeFinance — fonte de verdade em docs/DESIGN.md (emenda de 09/09/2026).
+   Cores autoradas em OKLCH; o hex do documento é apenas referência.
+   Nenhum componente inventa cor: estados saem de color-mix() sobre estes tokens. */
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    /* Superfícies e texto — tema claro */
+    --bg: oklch(97% 0.007 88.6);
+    --surface: oklch(100% 0 89.9);
+    --surface-sunken: oklch(95% 0.01 87.5);
+    --border: oklch(90.7% 0.014 88.7);
+    --border-strong: oklch(59.2% 0.02 81.3);
+    --ink: oklch(25.8% 0.01 80.6);
+    --ink-muted: oklch(51.7% 0.019 79.3);
+
+    /* Cor cromática — reservada a ação e a significado financeiro */
+    --accent: oklch(43.9% 0.071 172.3);
+    --on-solid: oklch(100% 0 89.9);
+    --income: oklch(52.3% 0.135 144.2);
+    --expense: oklch(50.1% 0.178 28.7);
+    --warning: oklch(56% 0.117 77.5);
+    --warning-ink: oklch(47.1% 0.099 76.3);
+    --danger: var(--expense);
+
+    /* Tipografia */
+    --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+    --font-ui: "Public Sans", system-ui, "Segoe UI", sans-serif;
+    --text-13: 0.8125rem;
+    --text-15: 0.9375rem;
+    --text-18: 1.125rem;
+    --text-22: 1.375rem;
+    --text-28: 1.75rem;
+    --text-36: 2.25rem;
+
+    /* Espaço, forma e movimento */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+    --space-8: 64px;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --control-h: 2.75rem;
+    --control-h-sm: 2.25rem;
+    --motion-fast: 120ms;
+    --motion-base: 160ms;
+    --ease: ease-out;
+
+    /* Sombra é privilégio de camada flutuante: <dialog> e popover, mais nada. */
+    --shadow-layer: 0 4px 16px rgb(0 0 0 / 12%);
+    --focus-ring: 2px solid var(--accent);
+    --focus-offset: 2px;
+  }
+
+  /* Escuro automático quando o usuário não escolheu manualmente. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --bg: oklch(19.7% 0.007 78.2);
+      --surface: oklch(23.7% 0.009 75.2);
+      --surface-sunken: oklch(21.6% 0.007 67.4);
+      --border: oklch(32% 0.014 76.4);
+      --border-strong: oklch(55.6% 0.021 78.1);
+      --ink: oklch(93.5% 0.012 84.6);
+      --ink-muted: oklch(69.5% 0.02 83.1);
+      --accent: oklch(67.2% 0.097 170.4);
+      --on-solid: oklch(19.7% 0.007 78.2);
+      --income: oklch(71.8% 0.142 144.9);
+      --expense: oklch(69.1% 0.161 26.6);
+      --warning: oklch(74.6% 0.132 79.3);
+      --warning-ink: oklch(74.6% 0.132 79.3);
+    }
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --bg: oklch(19.7% 0.007 78.2);
+    --surface: oklch(23.7% 0.009 75.2);
+    --surface-sunken: oklch(21.6% 0.007 67.4);
+    --border: oklch(32% 0.014 76.4);
+    --border-strong: oklch(55.6% 0.021 78.1);
+    --ink: oklch(93.5% 0.012 84.6);
+    --ink-muted: oklch(69.5% 0.02 83.1);
+    --accent: oklch(67.2% 0.097 170.4);
+    --on-solid: oklch(19.7% 0.007 78.2);
+    --income: oklch(71.8% 0.142 144.9);
+    --expense: oklch(69.1% 0.161 26.6);
+    --warning: oklch(74.6% 0.132 79.3);
+    --warning-ink: oklch(74.6% 0.132 79.3);
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go mod tidy)",
+      "Bash(gofmt *)",
+      "Bash(govulncheck *)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(npm ci)",
+      "Bash(npm audit)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(secrets/**)",
+      "Edit(.env)",
+      "Edit(.env.*)",
+      "Edit(secrets/**)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(grep -o '\"file_path\"[^,}]*' | head -n1); if printf %s \"$f\" | grep -qE '[\\\\/]backend[\\\\/]'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"Lembrete HomeFinance: arquivo do backend foi alterado. Regra do projeto: nenhuma entrega e concluida sem revisao de seguranca aprovada - antes de finalizar, execute /revisao-seguranca (agente revisor-seguranca) conforme docs/SEGURANCA.md.\"}}'; fi",
+            "timeout": 10,
+            "statusMessage": "Verificando regra de segurança do backend"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+@layer components {
+  .input {
+    --code-rule: var(--border-strong);
+
+    display: block;
+    /* Geometria em `em`, não em `ch` — medido no navegador em 09/09/2026:
+       com `tabular-nums` todo dígito da Public Sans mede exatamente 0.7em,
+       enquanto 1ch (o avanço do "0" proporcional) mede 0.612em. Usar `ch`,
+       como a spec sugeria, deslocaria o sexto dígito ~12px da pauta.
+       Casa = 0.7em de dígito + 0.3em de espaçamento = 1em; seis casas = 6em. */
+    inline-size: calc(6em + var(--space-6));
+    min-block-size: 4rem;
+    padding-inline: var(--space-3);
+    padding-block: var(--space-2);
+    background-color: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
+    border-block-end-width: 2px;
+    border-radius: var(--radius-sm);
+    color: var(--ink);
+    /* VERIFICADO NO NAVEGADOR (09/09/2026): a Fraunces empacotada NÃO tem a
+       feature `tnum` — "1" mede 12,36px e "0" mede 18,05px a 28px, com e sem
+       `tabular-nums`. Com essa diferença, 111111 sairia ~34px fora da pauta.
+       A spec 0002 §3 prevê exatamente este caso: só o CodeInput troca para
+       --font-ui, onde todo dígito mede 19,61px. */
+    font-family: var(--font-ui);
+    font-size: var(--text-28);
+    font-variant-numeric: tabular-nums slashed-zero;
+    letter-spacing: 0.3em;
+    /* Alinhado à esquerda: centralizar tiraria os dígitos da pauta enquanto o
+       código está incompleto. */
+    text-align: start;
+    caret-color: var(--accent);
+    transition: border-color var(--motion-fast) var(--ease);
+
+    /* A pauta: seis traços, um por casa. Único gradiente do app — e é estrutura,
+       não decoração. */
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--code-rule) 0 0.7em,
+      transparent 0.7em 1em
+    );
+    background-size: 6em 2px;
+    background-position: var(--space-3) calc(100% - var(--space-3));
+    background-repeat: no-repeat;
+  }
+
+  .input:focus-visible {
+    border-block-end-color: var(--accent);
+  }
+
+  /* No erro a pauta muda de cor; os dígitos continuam em `--ink`. Número é dado,
+     não estado financeiro. */
+  .input[aria-invalid="true"] {
+    --code-rule: var(--danger);
+
+    border-color: var(--danger);
+  }
+}

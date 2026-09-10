@@ -1,0 +1,661 @@
+openapi: 3.1.0
+
+info:
+  title: HomeFinance API
+  version: "1.0.0"
+  summary: Fundação do backend e autenticação (spec 0001)
+  description: |
+    Contrato da API do HomeFinance. **Fonte de verdade** do que a API expõe
+    (ADR-006). Nesta entrega os handlers são escritos à mão (ADR-011), e o
+    teste `cmd/api/routes_test.go` garante que o conjunto de (método, caminho)
+    daqui é exatamente o da tabela de rotas em `cmd/api/routes.go` — divergir
+    quebra o build.
+
+    Convenções:
+      - JSON em `camelCase`; datas em ISO 8601 UTC.
+      - Dinheiro sempre em centavos (`int64`) — nenhum endpoint desta entrega
+        trafega dinheiro ainda.
+      - Erro sempre no formato único do schema `Error`.
+      - Sessão em cookies `HttpOnly; Secure; SameSite=Strict; Path=/`, com
+        prefixo `__Host-` quando `COOKIE_SECURE=true` (ADR-013).
+
+    **Respostas propositalmente indistinguíveis** (§3.12 da spec 0001): os
+    endpoints de registro, reenvio, recuperação de senha, validação de código,
+    login e refresh devolvem o mesmo status e o mesmo corpo para situações
+    diferentes, de modo a não revelar se um e-mail está cadastrado.
+  license:
+    name: Proprietário
+
+servers:
+  - url: /api/v1
+    description: Base de todos os caminhos
+
+tags:
+  - name: health
+    description: Sondas de disponibilidade
+  - name: auth
+    description: Registro, verificação de e-mail, sessão e senha
+  - name: me
+    description: Dados da sessão atual
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Liveness
+      description: |
+        Não toca o banco (D17) e não expõe versão, driver ou ambiente.
+      security: []
+      responses:
+        "200":
+          description: Serviço vivo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+
+  /health/ready:
+    get:
+      tags: [health]
+      operationId: getHealthReady
+      summary: Readiness
+      description: Faz ping no banco. Nenhum detalhe do erro sai na resposta.
+      security: []
+      responses:
+        "200":
+          description: Pronto para receber tráfego
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: Dependência indisponível
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: postAuthRegister
+      summary: Abre uma tentativa de cadastro e envia o código de 6 dígitos
+      description: |
+        **Grupo A da §3.12** — devolve 202 com o mesmo corpo, byte a byte, para
+        e-mail novo, e-mail já cadastrado e verificado, e e-mail cadastrado e
+        ainda não verificado.
+
+        Cada chamada abre a SUA PRÓPRIA tentativa de cadastro, com as
+        credenciais deste pedido e um código próprio, e devolve o
+        `registrationToken` que amarra os dois. Um pedido nunca destrói nem
+        bloqueia o de outra pessoa para o mesmo endereço.
+
+        O cliente **precisa guardar o `registrationToken`** — ele é
+        obrigatório em `POST /auth/verify-email`. Perdeu o token? Basta chamar
+        este endpoint de novo: o cadastro sempre funciona e sempre devolve um
+        token novo amarrado às credenciais informadas.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "202":
+          description: Pedido aceito; se couber, um código foi enfileirado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequired" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/verify-email:
+    post:
+      tags: [auth]
+      operationId: postAuthVerifyEmail
+      summary: Confirma o e-mail com o código e já autentica
+      description: |
+        Exige o `registrationToken` devolvido por `POST /auth/register` (ou por
+        `POST /auth/resend-code`) **junto** do código. O código é procurado
+        DENTRO da tentativa que o token identifica: um código que pertence a
+        outra tentativa do mesmo endereço não existe para efeito de
+        validação.
+
+        É essa amarração que fecha o ataque de *pre-hijacking* de conta — o
+        código de quem tentou se antecipar chega à caixa do titular, mas é
+        inútil sem o token de quem o pediu.
+
+        Em caso de sucesso, ativa as credenciais **da tentativa dona daquele
+        código**, destrói todas as outras tentativas pendentes do endereço,
+        cria a casa padrão e a associação de dono (ADR-012) e devolve os
+        cookies de sessão.
+
+        Só é validável o código que foi **efetivamente enviado** por e-mail.
+        Uma tentativa criada enquanto o cooldown ou a cota seguravam a
+        mensagem guarda o código, mas ele não valida nada até que o reenvio
+        **com o token** entregue a mensagem de verdade — sem isso, cada
+        cadastro criaria um alvo de chute novo sem gastar mensagem e o teto de
+        envio por endereço deixaria de limitar quantos códigos existem para
+        adivinhar.
+
+        **Grupo D da §3.12** — código errado, expirado, já consumido, com
+        tentativas esgotadas, de outro propósito, de outra tentativa, nunca
+        enviado por e-mail, de e-mail sem código ou de e-mail inexistente
+        devolvem todos 401 `INVALID_CODE`, com a mesma mensagem.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerifyEmailRequest" }
+      responses:
+        "200":
+          description: E-mail confirmado; cookies de sessão emitidos
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/InvalidCode" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/resend-code:
+    post:
+      tags: [auth]
+      operationId: postAuthResendCode
+      summary: Reenvia o código de confirmação de e-mail
+      description: |
+        **Grupo B da §3.12** — e-mail existente, inexistente, conta já
+        verificada, pedido dentro do cooldown de 60 s e pedido **sem token**
+        devolvem 202 com o mesmo corpo.
+
+        O `registrationToken` recebido no cadastro é **obrigatório**: com ele,
+        o reenvio troca o código DAQUELA tentativa e devolve o mesmo token,
+        que continua valendo — inclusive depois de as 5 tentativas de um
+        código terem se esgotado.
+
+        **Sem o token nada é emitido.** Quem pede reenvio não apresenta
+        credenciais, então qualquer código emitido para ele teria de herdar as
+        credenciais de alguma tentativa existente — e herdar as de outra
+        pessoa é a tomada de conta que o ADR-014 fecha. Não adianta restringir
+        a "endereço com uma única tentativa viva": o atacante fabrica essa
+        condição sozinho, bastando que a tentativa da vítima tenha expirado e
+        a dele esteja viva. **Quem perdeu o token refaz o cadastro** — `POST
+        /auth/register` sempre funciona e sempre amarra o token novo às
+        credenciais de quem pediu.
+
+        A resposta traz sempre um `registrationToken` bem formado, para não
+        revelar qual dos caminhos acima foi tomado.
+
+        O envio respeita o cooldown E a cota por endereço — o mesmo balde do
+        cadastro, e não um teto por rota. É também o único jeito de tornar
+        validável o código de uma tentativa cuja mensagem foi segurada pelo
+        cooldown ou pela cota: código que nunca saiu por e-mail não valida
+        nada (ver `POST /auth/verify-email`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResendCodeRequest" }
+      responses:
+        "202":
+          description: Pedido aceito
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequired" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: postAuthLogin
+      summary: Autentica por e-mail e senha
+      description: |
+        **Grupo E da §3.12** — e-mail inexistente e senha errada devolvem 401
+        `INVALID_CREDENTIALS` com a mesma mensagem e o mesmo custo de Argon2id.
+
+        O 403 `EMAIL_NOT_VERIFIED` só é emitido DEPOIS de a senha conferir:
+        quem o recebe já provou saber a senha, então nada de novo é revelado.
+        Nesse caminho um código novo é reemitido e enviado.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Autenticado; cookies de sessão emitidos
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/InvalidCredentials" }
+        "403":
+          description: Conta existe e a senha confere, mas o e-mail não foi confirmado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: postAuthRefresh
+      summary: Rotaciona a sessão a partir do cookie de refresh
+      description: |
+        O refresh usado é sempre invalidado. Reúso de um refresh já revogado
+        derruba a família inteira de tokens e grava
+        `auth.refresh_reuse_detected` na auditoria.
+
+        **Grupo F da §3.12** — cookie ausente, malformado, expirado, revogado
+        ou reusado devolvem 401 `INVALID_SESSION`, e os cookies são sempre
+        limpos.
+      responses:
+        "200":
+          description: Sessão rotacionada
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/InvalidSession" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: postAuthLogout
+      summary: Encerra a sessão
+      description: Idempotente — responde 204 mesmo sem cookie algum.
+      responses:
+        "204":
+          description: Sessão encerrada; cookies limpos
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/ClearSessionCookie" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      operationId: postAuthForgotPassword
+      summary: Pede um código para redefinir a senha
+      description: |
+        **Grupo C da §3.12** — e-mail existente e verificado, existente e não
+        verificado, ou inexistente devolvem 202 com o mesmo corpo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailRequest" }
+      responses:
+        "202":
+          description: Pedido aceito
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ForgotPasswordAccepted" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      operationId: postAuthResetPassword
+      summary: Redefine a senha com o código de 6 dígitos
+      description: |
+        Ao concluir, TODOS os refresh tokens do usuário são revogados
+        (docs/SEGURANCA.md §1.1) e os cookies desta requisição são limpos.
+
+        Um código emitido para confirmação de e-mail não é aceito aqui: o
+        propósito faz parte do HMAC validado.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        "204":
+          description: Senha redefinida; sessões encerradas
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/ClearSessionCookie" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/InvalidCode" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /me:
+    get:
+      tags: [me]
+      operationId: getMe
+      summary: Dados do usuário e da casa ativa
+      description: |
+        A casa ativa vem da claim `hid` do access token e é REVALIDADA contra
+        o banco a cada chamada: se a associação não existir mais, a resposta é
+        401 e os cookies são limpos.
+      responses:
+        "200":
+          description: Sessão atual
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-hf_access
+      description: |
+        JWT HS256 de vida curta (15 min). Sem o prefixo `__Host-` quando
+        `COOKIE_SECURE=false` (apenas desenvolvimento).
+
+  headers:
+    SetSessionCookie:
+      description: |
+        Dois cookies são emitidos: `hf_access` (JWT, 15 min) e `hf_refresh`
+        (token opaco, 14 dias), ambos
+        `HttpOnly; Secure; SameSite=Strict; Path=/`, com prefixo `__Host-`
+        quando `COOKIE_SECURE=true`.
+      schema: { type: string }
+    ClearSessionCookie:
+      description: Cookies de sessão expirados (Max-Age=-1).
+      schema: { type: string }
+
+  responses:
+    ValidationFailed:
+      description: Dados inválidos
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ValidationError" }
+    Unauthenticated:
+      description: Autenticação necessária
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InvalidCredentials:
+      description: E-mail ou senha inválidos
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InvalidCode:
+      description: Código inválido ou expirado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InvalidSession:
+      description: Sessão inválida; cookies limpos
+      headers:
+        Set-Cookie: { $ref: "#/components/headers/ClearSessionCookie" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Muitas requisições
+      headers:
+        Retry-After:
+          description: Segundos até a próxima tentativa permitida
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: Corpo acima do limite de 1 MiB
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UnsupportedMediaType:
+      description: Content-Type diferente de application/json
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InternalError:
+      description: Erro interno; nenhum detalhe é exposto
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    HealthStatus:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_FAILED
+        - INVALID_CREDENTIALS
+        - INVALID_CODE
+        - EMAIL_NOT_VERIFIED
+        - UNAUTHENTICATED
+        - INVALID_SESSION
+        - FORBIDDEN
+        - NOT_FOUND
+        - METHOD_NOT_ALLOWED
+        - RATE_LIMITED
+        - PAYLOAD_TOO_LARGE
+        - UNSUPPORTED_MEDIA_TYPE
+        - SERVICE_UNAVAILABLE
+        - INTERNAL_ERROR
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message:
+              type: string
+              description: Mensagem genérica em pt-BR; nunca contém detalhe interno.
+
+    ValidationError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              const: VALIDATION_FAILED
+            message: { type: string }
+            fields:
+              type: object
+              description: Só existe em VALIDATION_FAILED.
+              additionalProperties: { type: string }
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 254 }
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: |
+            Argon2id no servidor. Reprovada se for muito comum ou se contiver
+            o e-mail ou o nome do titular.
+
+    EmailRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+
+    ResendCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        registrationToken:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Opcional no contrato, indispensável na prática: é o token da
+            tentativa de cadastro em curso, devolvido por `POST /auth/register`.
+
+            Sem ele o servidor responde o mesmo 202 (grupo B da §3.12), mas
+            **nada é emitido** — quem pede reenvio não apresenta credenciais,
+            então qualquer código emitido para ele herdaria as de outra
+            pessoa. Quem perdeu o token refaz o cadastro.
+
+            Não está em `required` porque o servidor NÃO recusa o pedido sem
+            ele: manter uma única forma de resposta neste endpoint é mais
+            barato de auditar do que somar um 400. O gerador de clientes não
+            pode prometer uma obrigatoriedade que o servidor não cobra.
+            Quando o campo VEM, a forma é cobrada: 64 hexadecimais ou 400.
+
+    VerifyEmailRequest:
+      type: object
+      additionalProperties: false
+      required: [email, code, registrationToken]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+          description: Seis dígitos; zeros à esquerda são significativos.
+        registrationToken:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Obrigatório. O token devolvido por `POST /auth/register` ou
+            `POST /auth/resend-code`. O código só é validado dentro da
+            tentativa que este token identifica.
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 1, maxLength: 256 }
+
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [email, code, newPassword]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        code: { type: string, pattern: "^[0-9]{6}$" }
+        newPassword: { type: string, minLength: 12, maxLength: 256 }
+
+    VerificationRequired:
+      type: object
+      additionalProperties: false
+      required: [status, email, expiresInSeconds, registrationToken]
+      properties:
+        status:
+          type: string
+          const: verification_required
+        email:
+          type: string
+          description: O e-mail enviado na requisição, normalizado.
+        expiresInSeconds:
+          type: integer
+          description: Validade do código.
+        registrationToken:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Segredo opaco de 256 bits que identifica ESTA tentativa de
+            cadastro. Guarde-o no cliente e envie-o em
+            `POST /auth/verify-email`.
+
+            Sozinho não autentica nada: só serve junto do código de 6
+            dígitos que foi para a caixa de entrada. Está sempre presente e
+            sempre com 64 hexadecimais, em todos os caminhos, para não revelar
+            o estado da conta (§3.12, grupos A e B).
+
+    ForgotPasswordAccepted:
+      type: object
+      additionalProperties: false
+      required: [status, message, expiresInSeconds]
+      properties:
+        status:
+          type: string
+          const: accepted
+        message: { type: string }
+        expiresInSeconds: { type: integer }
+
+    HouseholdSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, role]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 120 }
+        role:
+          type: string
+          enum: [owner, member]
+
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, email, emailVerifiedAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 120 }
+        email: { type: string, format: email }
+        emailVerifiedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt: { type: string, format: date-time }
+
+    Me:
+      type: object
+      additionalProperties: false
+      required: [user, household, households]
+      properties:
+        user: { $ref: "#/components/schemas/UserSummary" }
+        household: { $ref: "#/components/schemas/HouseholdSummary" }
+        households:
+          type: array
+          items: { $ref: "#/components/schemas/HouseholdSummary" }
+
+security:
+  - sessionCookie: []

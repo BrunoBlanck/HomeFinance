@@ -1,0 +1,122 @@
+@layer components {
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-block-size: var(--control-h);
+    padding-inline: var(--space-4);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    transition:
+      background-color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+
+    &[data-size="sm"] {
+      min-block-size: var(--control-h-sm);
+      padding-inline: var(--space-3);
+      font-size: var(--text-13);
+    }
+
+    &[data-full-width="true"] {
+      inline-size: 100%;
+    }
+
+    &[data-variant="primary"] {
+      background-color: var(--accent);
+      color: var(--on-solid);
+    }
+
+    &[data-variant="secondary"] {
+      background-color: var(--surface);
+      border-color: var(--border-strong);
+      color: var(--ink);
+    }
+
+    &[data-variant="quiet"] {
+      color: var(--accent);
+    }
+
+    &[data-variant="danger"] {
+      background-color: var(--danger);
+      color: var(--on-solid);
+    }
+  }
+
+  .icon {
+    display: inline-flex;
+    flex: none;
+    inline-size: 1rem;
+    block-size: 1rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .label {
+    white-space: nowrap;
+  }
+
+  @media (hover: hover) {
+    .button:hover:not(:disabled, [aria-disabled="true"]) {
+      &[data-variant="primary"] {
+        background-color: color-mix(in oklch, var(--accent), var(--ink) 18%);
+      }
+
+      &[data-variant="secondary"] {
+        background-color: color-mix(in oklch, var(--accent), transparent 88%);
+      }
+
+      &[data-variant="quiet"] {
+        background-color: color-mix(in oklch, var(--accent), transparent 88%);
+      }
+
+      &[data-variant="danger"] {
+        background-color: color-mix(in oklch, var(--danger), var(--ink) 18%);
+      }
+    }
+  }
+
+  /* Sem `transform` no active: o botão afunda em cor, não em movimento. */
+  .button:active:not(:disabled, [aria-disabled="true"]) {
+    &[data-variant="primary"] {
+      background-color: color-mix(in oklch, var(--accent), var(--ink) 28%);
+    }
+
+    &[data-variant="secondary"],
+    &[data-variant="quiet"] {
+      background-color: color-mix(in oklch, var(--accent), transparent 80%);
+    }
+
+    &[data-variant="danger"] {
+      background-color: color-mix(in oklch, var(--danger), var(--ink) 28%);
+    }
+  }
+
+  /* Ocupado ≠ desabilitado: em carregamento a cor permanece cheia. */
+  .button:is(:disabled, [aria-disabled="true"]):not([aria-busy="true"]) {
+    cursor: default;
+    color: color-mix(in oklch, var(--ink), var(--bg) 40%);
+
+    &[data-variant="primary"],
+    &[data-variant="danger"] {
+      background-color: color-mix(in oklch, var(--border-strong), var(--bg) 55%);
+      color: color-mix(in oklch, var(--ink), var(--bg) 25%);
+    }
+
+    &[data-variant="secondary"] {
+      border-color: var(--border);
+    }
+  }
+
+  .button[aria-busy="true"] {
+    cursor: progress;
+  }
+}
