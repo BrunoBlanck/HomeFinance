@@ -1,0 +1,17 @@
+@layer components {
+  /* Três campos em linha; empilham abaixo de 40rem. `auto-fit` com mínimo de
+     11rem em vez de três colunas fixas: num idioma com rótulos longos, três
+     colunas fixas cortam o texto do rótulo. */
+  .campos {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: var(--space-4);
+  }
+
+  .apoio {
+    max-inline-size: 72ch;
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+}

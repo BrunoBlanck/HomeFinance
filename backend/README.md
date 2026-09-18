@@ -135,6 +135,7 @@ Todos os valores são lidos **exclusivamente** por `internal/platform/config`. `
 | Variável | Padrão | Obrigatória | Descrição |
 |---|---|---|---|
 | `APP_ENV` | `development` | não | `development`, `test` ou `production`. Em produção ativa as travas da tabela final. |
+| `RATE_LIMITS_PROFILE` | `default` | não | Conjunto de limites de abuso: `default` (produção) ou `test` (perfil frouxo da suíte automatizada). **Recusado em produção** — o boot falha. Valor desconhecido também falha. Ver `docs/SEGURANCA.md` §5.2. |
 
 ### Servidor HTTP
 
@@ -231,7 +232,8 @@ O boot **falha** se qualquer uma destas condições ocorrer:
 - `SMTP_TLS=false`;
 - `COOKIE_SECURE=false`;
 - `CORS_ORIGIN` vazio ou com curinga;
-- `DB_DRIVER=sqlite`.
+- `DB_DRIVER=sqlite`;
+- `RATE_LIMITS_PROFILE=test` — é o perfil frouxo da suíte automatizada.
 
 E, em **qualquer** ambiente: `JWT_SECRET` ou `OTP_PEPPER` com menos de 32 bytes, ou iguais entre si.
 
@@ -240,9 +242,11 @@ E, em **qualquer** ambiente: `JWT_SECRET` ou `OTP_PEPPER` com menos de 32 bytes,
 | Item | Valor | Por quê |
 |---|---|---|
 | Limite de corpo da requisição | 1 MiB | Afrouxar por env seria um botão de negação de serviço. |
-| Limites de taxa | §7 da spec 0001 (ver abaixo) | São limites de segurança, não sintonia operacional: mudar exige código revisado. Ficam em `config.DefaultRateLimits()`. |
+| Limites de taxa, **regra a regra** | §7 da spec 0001 (ver abaixo) | São limites de segurança, não sintonia operacional: mudar um valor exige código revisado. Ficam em `config.DefaultRateLimits()`. **Não existe** variável por limite (`RATE_LIMIT_IMPORT_UPLOAD=…` não é lida por nada) — é por aí que um teto frouxo vaza para produção sem aparecer em revisão. O único interruptor é `RATE_LIMITS_PROFILE`, que troca o **conjunto inteiro** e é recusado em produção (`docs/SEGURANCA.md` §5.2). |
 
 **Limites de taxa vigentes** — global 100/min por IP · login 10/min por IP + 5/15min por conta · register 5/h por IP · resend-code 3/h por IP + cooldown de 60s por e-mail · forgot-password 5/h por IP + 3/h por conta · verify-email e reset-password 10/min por IP · refresh 60/min por IP · health/ready 60/min por IP.
+
+**Por casa** (chave = HMAC do `household_id`) — `POST /imports` 10/h (+20/h por IP) · `POST /imports/{id}/confirm` 30/h · `POST /transactions/auto-categorize` 60/h · `POST /transfers/detect` 60/h com estouro 3 · `PATCH /transactions/{id}` **120/h** (desde 17/09/2026: a rota escreve e audita a cada chamada, e o balde global por IP não é teto por casa; 120 acomoda a rajada legítima de categorizar uma fatura inteira).
 
 **Cotas de ENVIO por endereço** (`auth.MailLimiters`, aplicadas no serviço) — código de verificação disparado pelo registro **10/h por endereço** (era 3/h até 09/09/2026), mais o cooldown de 60 s; aviso "conta já existe" **1 por 24 h por endereço**. Elas seguram a MENSAGEM e nunca devolvem 429: o e-mail do cadastro vem do corpo sem prova de posse, então recusar a requisição por endereço permitiria a um terceiro trancar o cadastro de um endereço alheio (lockout por procuração). A requisição continua respondendo o 202 do grupo A. **O número 10 depende de uma relação, não é solto:** a cota por endereço tem de ficar ACIMA do teto de `register` por IP (5/h), senão um único IP drena o balde do endereço alheio e a negação de cadastro por procuração volta — invariante coberto por teste em `internal/platform/config`. Custo colateral registrado na §1.1 de `docs/SEGURANCA.md`: o orçamento de palpites de OTP por endereço passa de 15/h para 50/h (10 códigos × 5 tentativas), ainda folgado contra os 10⁶ valores. Todo 429 traz `Retry-After`. A chave "por conta" é o **HMAC do e-mail com o pepper** — o e-mail em claro nunca entra no mapa do limitador.
 

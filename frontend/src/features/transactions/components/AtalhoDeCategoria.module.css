@@ -1,0 +1,169 @@
+@layer components {
+  /* O controle da célula — a lacuna (docs/DESIGN.md, E2c (h) §1).
+
+     Não é variante do Button: é o quarto portador de estado, a forma do
+     controle — uma lacuna a preencher, não uma ação a disparar. Tracejado é a
+     linguagem que o Badge muted já usa para "vazio", mas em --border-strong,
+     porque é controle e precisa de 3:1. Peso 400 de propósito: é estado, não
+     chamada. Cabe na altura atual da linha (36px < 42px). */
+  .lacuna {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-block-size: var(--control-h-sm);
+    padding-inline: var(--space-2);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: var(--ink-muted);
+    font: 400 var(--text-13) var(--font-ui);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+
+    /* Aberto: a borda fecha (a lacuna está sendo preenchida), o texto sobe
+       para --ink e o chevron vira. O fundo é o mesmo fantasma do hover. */
+    &[aria-expanded="true"] {
+      border-style: solid;
+      color: var(--ink);
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    }
+  }
+
+  /* Caixa fixa de 14px (o tamanho do ícone): numa coluna de largura mínima o
+     flex encolheria o svg a zero. Mesmo remédio do `.icon` do Button. */
+  .chevron {
+    display: inline-flex;
+    flex: none;
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    align-items: center;
+    justify-content: center;
+    transition: rotate var(--motion-base) var(--ease);
+
+    & svg {
+      flex: none;
+    }
+  }
+
+  .lacuna[aria-expanded="true"] .chevron {
+    rotate: 180deg;
+  }
+
+  @media (hover: hover) {
+    .lacuna:hover {
+      color: var(--ink);
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lacuna,
+    .chevron {
+      transition: none;
+    }
+  }
+
+  /* O editor — conteúdo da linha de detalhe (docs/DESIGN.md, E2c (h) §2).
+
+     Um <fieldset> em linha: select, fichas, dica e ações, na ordem do DOM,
+     que é a ordem do Tab. Sem borda, sem fundo próprio, sem sombra: a linha
+     se expandiu, e é só isso que aconteceu. */
+  .editor {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    /* O fieldset nasce com min-inline-size: min-content e estouraria a célula
+       antes de quebrar a linha. */
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+
+    /* As opções mais longas não ditam a largura: fechado, o select ganha
+       reticências; a lista aberta é do sistema e mostra tudo. */
+    & select {
+      max-inline-size: 20rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  /* As fichas de aprender: o Button quiet sm do sistema, sem estilo inventado.
+     O que este arquivo desenha é só o arranjo e a ficha que virou fato. */
+  .fichas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .rotulo {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* A palavra que (a) gravou e (b) não acompanhou: texto estático com o ícone
+     de feito, na altura do botão que ela substituiu, para a linha não pular. */
+  .gravada {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-block-size: var(--control-h-sm);
+    padding-inline: var(--space-2);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .lotada {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* A dica de consequência ocupa a linha inteira: é a frase que explica o que
+     a ficha pressionada vai fazer com o resto do mês. */
+  .dica {
+    flex-basis: 100%;
+    font-size: var(--text-13);
+    line-height: 1.45;
+    color: var(--ink-muted);
+  }
+
+  .vazio {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  /* Na mesma linha, à direita; ao quebrar, desce e fica à direita, como
+     rodapé de diálogo. */
+  .acoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-inline-start: auto;
+  }
+
+  @media (max-width: 40rem) {
+    .editor {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--space-3);
+    }
+
+    .acoes {
+      margin-inline-start: 0;
+    }
+  }
+}

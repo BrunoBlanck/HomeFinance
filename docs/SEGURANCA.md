@@ -78,6 +78,34 @@ Decisão do usuário (09/09/2026): **nenhuma conta existe sem e-mail verificado*
 - CORS: origem exata do frontend via config — nunca `*` com credenciais.
 - Rate limiting global e por rota sensível (login, refresh, criação de conta) — `golang.org/x/time/rate`, por IP e por conta.
 
+### 5.1 Limites de abuso — baldes por rota
+
+Todo teto vive em `config.DefaultRateLimits()` e é aplicado como middleware na **tabela de rotas** (`cmd/api/routes.go`), nunca dentro de um handler: limitador escondido no handler não aparece na tabela, não é revisável e não é testável junto com os outros. Todo 429 devolve `Retry-After` e corpo genérico — sem casa, sem id, sem nome de rota.
+
+A chave de um balde **por casa** é o **HMAC do `household_id`** com o pepper da aplicação, pelo mesmo motivo do e-mail: o id em claro nunca entra no mapa do limitador.
+
+**`PATCH /transactions/{id}` tem balde próprio desde 17/09/2026** (decisão do usuário; emenda §11 da spec 0005): **120/h por casa**. Antes, o único teto sobre ele era o global de 100/min por IP — que não é por casa. A rota grava uma linha **e escreve uma linha de `audit_log` a cada chamada**, então sem teto por casa quem tivesse endereços sobrando enchia a auditoria de uma casa de graça. O número é generoso de propósito (categorizar a fatura recém-importada é uma **rajada legítima**: a pessoa varre a lista clicando categoria em lançamento após lançamento) e ainda assim **finito**.
+
+### 5.2 Perfil de limites por ambiente — `RATE_LIMITS_PROFILE`
+
+Decisão do usuário (17/09/2026). A suíte de ponta a ponta bate nos tetos reais — 5 cadastros/h por IP e 10 importações/h por casa foram atingidos **exatamente** (5/5 e 10/10) em 09/2026, e o próximo cenário de importação não cabe. A saída é um **perfil**, não um afrouxamento:
+
+| Valor | Efeito |
+|---|---|
+| `default` (padrão, e o que vale sem a variável) | `config.DefaultRateLimits()` — os limites de produção, byte a byte. |
+| `test` | `ProfileRateLimits("test")` — o conjunto **inteiro** substituído por tetos altos para robô. |
+
+**Desenho, e por que é este:**
+
+- **Um interruptor só, de conjunto.** Não existe — e não pode passar a existir — override por regra (`RATE_LIMIT_IMPORT_UPLOAD=9999`). Uma variável solta por limite é indistinguível de configuração legítima num manifesto e é exatamente o caminho pelo qual um teto frouxo vaza para produção sem aparecer em revisão nenhuma. Teste que trava isso: `TestSemOInterruptorOAmbienteNaoMudaNenhumLimite`.
+- **Produção recusa.** Com `APP_ENV=production` e `RATE_LIMITS_PROFILE=test` a configuração **falha no boot**, com a mesma força de `MAILER=console` em produção. O valor é normalizado (caixa e espaços) antes da comparação, então `TEST`, ` test ` e `Test` caem na mesma trava.
+- **Perfil desconhecido é falha, não silêncio.** `RATE_LIMITS_PROFILE=testing` não "cai no padrão": o boot morre. Quem digitou errado quis afrouxar e precisa descobrir que não afrouxou.
+- **O boot avisa em `Warn`.** Com o perfil frouxo ativo, a API loga `"perfil de limites de abuso FROUXO ativo — use apenas em teste automatizado, NUNCA em produção"`, e `rate_limits_profile` passa a sair em toda linha que loga a configuração.
+- **Frouxo não é "sem limite".** O perfil de teste **eleva tetos** mantendo a forma das regras: mesmas janelas, todo limite finito, `RegisterMailPerAccount > Register` preservado (é o invariante da negação de cadastro por procuração) e o estouro da rota cara continua menor que a cota (achado A2). Coberto por `TestPerfilDeTesteMantemAFormaDasRegras`.
+- **Os valores de produção não mudaram.** `TestSemVariavelDePerfilOsLimitesSaoOsPadroes` compara o conjunto inteiro com `DefaultRateLimits()` em `development` e em `production`.
+
+**Uso:** só a suíte automatizada, exportando `RATE_LIMITS_PROFILE=test` no processo da API de teste (o E2E sobe a API em `frontend/e2e/support/global-setup.ts`, com `APP_ENV=development`). Nenhum manifesto de produção contém essa variável — e se contiver, o serviço não sobe.
+
 ## 6. Frontend
 
 - Nunca `dangerouslySetInnerHTML` com dado de usuário; nunca montar HTML/URL por concatenação de entrada.

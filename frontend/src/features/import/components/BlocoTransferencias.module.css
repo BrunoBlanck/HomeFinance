@@ -1,0 +1,39 @@
+@layer components {
+  .cabecalho {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* O apoio do bloco explica o que "registrar como transferência" faz com o
+     dinheiro. Corpo do painel, não subtítulo: é um parágrafo, não uma legenda. */
+  .apoio {
+    max-inline-size: 72ch;
+    padding: var(--space-3) var(--space-4);
+    border-block-end: 1px solid var(--border);
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  @media (max-width: 40rem) {
+    /* O cabeçalho do Panel não quebra linha: com o botão inteiro numa linha só
+       ("Aceitar as 2 transferências sugeridas"), o título ficaria sem largura
+       e passaria por cima dele. Aqui o botão cede — quebra o rótulo em duas
+       linhas dentro de um teto — e o título fica com o resto. */
+    .cabecalho {
+      max-inline-size: 11rem;
+      justify-content: end;
+    }
+
+    .cabecalho button {
+      block-size: auto;
+      padding-block: var(--space-1);
+    }
+
+    .cabecalho button > span {
+      white-space: normal;
+    }
+  }
+}

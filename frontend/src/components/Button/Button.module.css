@@ -64,6 +64,14 @@
     white-space: nowrap;
   }
 
+  /* Ficha de alternância pressionada (docs/DESIGN.md, E2c (h)): o mesmo
+     fantasma do hover, e só ele. O portador não-cromático do estado é a troca
+     do ícone (`PlusIcon` → `CheckIcon`) e o rótulo do confirmar, que cita a
+     palavra — em `grayscale(1)` a ficha continua legível. */
+  .button[data-variant="quiet"][aria-pressed="true"] {
+    background-color: color-mix(in oklch, var(--accent), transparent 88%);
+  }
+
   @media (hover: hover) {
     .button:hover:not(:disabled, [aria-disabled="true"]) {
       &[data-variant="primary"] {

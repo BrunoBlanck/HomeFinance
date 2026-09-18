@@ -1,0 +1,150 @@
+@layer components {
+  /* A caixa reproduz `.control` de FieldShell.module.css — a mesma linha do
+     caderno (fundo recuado, borda de baixo de 2px) — só que agora ela abriga
+     fichas e um input, então vira flex com quebra de linha. Vazia, tem a
+     altura exata de um TextField: `min-block-size: var(--control-h)`. */
+  .caixa {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    inline-size: 100%;
+    min-block-size: var(--control-h);
+    padding: var(--space-1) var(--space-2);
+    background-color: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
+    border-block-end-width: 2px;
+    border-radius: var(--radius-sm);
+    cursor: text;
+    transition: border-color var(--motion-fast) var(--ease);
+  }
+
+  /* Um anel só, o da caixa: o input interno tem `outline: none` e é a caixa
+     que reage ao foco dele via `:has()`. Foco num × é outra história — o ×
+     desenha o próprio anel, porque ali o que está focado é o botão. */
+  .caixa:has(input:focus-visible) {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+    border-block-end-color: var(--accent);
+  }
+
+  .caixa[data-invalid="true"] {
+    border-color: var(--danger);
+  }
+
+  /* `display: contents`: a lista existe para a semântica ("lista de 3 itens")
+     e não para o leiaute — as fichas participam do flex da caixa como se
+     fossem filhas diretas, lado a lado com o input. */
+  .lista {
+    display: contents;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* Ficha: 36px numa caixa de 44px, com 4px de folga em cima e embaixo. Texto
+     `--ink`, fundo `--surface` sobre o recuado da caixa — a diferença de
+     superfície é o que a destaca, não cor cromática. */
+  .ficha {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    max-inline-size: 100%;
+    block-size: var(--control-h-sm);
+    padding-inline-start: var(--space-2);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  /* Inválida: borda em `--danger` E o ícone de alerta antes do texto — erro
+     nunca sinalizado só por cor (WCAG 1.4.1). O texto continua `--ink`; a
+     explicação vai na mensagem da FieldShell. */
+  .ficha[data-invalid="true"] {
+    border-color: var(--danger);
+  }
+
+  .alerta {
+    display: inline-flex;
+    flex: none;
+    color: var(--danger);
+  }
+
+  .texto {
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* O × é `--ink-muted`, NUNCA vermelho: remover uma palavra-chave não é
+     dinheiro nem erro. Alvo de 36px de largura; a altura acompanha a ficha
+     (34px de miolo entre as bordas), acima do mínimo de 24px da AA. */
+  .remover {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    inline-size: var(--control-h-sm);
+    block-size: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition:
+      color var(--motion-fast) var(--ease),
+      background-color var(--motion-fast) var(--ease);
+  }
+
+  @media (hover: hover) {
+    .remover:hover {
+      color: var(--ink);
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    }
+  }
+
+  /* Anel para dentro: a ficha tem 4px de folga na caixa, e um anel de 2px com
+     offset de 2px para fora encostaria na borda da caixa. */
+  .remover:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(-1 * var(--focus-offset));
+    color: var(--ink);
+  }
+
+  /* O input é só o cursor e o texto: sem borda, sem fundo, sem placeholder
+     (o exemplo mora na dica). Cresce para ocupar o que sobra da linha e nunca
+     encolhe abaixo de 8 caracteres — antes disso, quebra para a linha de
+     baixo. */
+  .input {
+    flex: 1 1 8ch;
+    min-inline-size: 8ch;
+    block-size: var(--control-h-sm);
+    padding: 0 var(--space-1);
+    border: 0;
+    background-color: transparent;
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    caret-color: var(--accent);
+    outline: none;
+  }
+
+  /* Contador no canto do rótulo — o único texto do campo que muda sozinho.
+     Em 20 de 20 sobe para `--ink` e peso 600: é o limite, não um número. */
+  .contador {
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-muted);
+  }
+
+  .contador[data-full="true"] {
+    color: var(--ink);
+    font-weight: 600;
+  }
+}

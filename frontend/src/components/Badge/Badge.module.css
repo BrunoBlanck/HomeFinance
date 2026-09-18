@@ -1,0 +1,43 @@
+@layer components {
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-block: 2px;
+    padding-inline: var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-sunken);
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    line-height: 1.4;
+    color: var(--ink-muted);
+    white-space: nowrap;
+
+    &[data-tone="muted"] {
+      /* Arquivado: presente, mas fora do caminho. Sem cor cromática. */
+      background-color: transparent;
+      border-style: dashed;
+    }
+
+    /* Os tons cromáticos nunca inventam cor: o fundo sai de color-mix sobre o
+       token, como manda o docs/DESIGN.md. */
+    &[data-tone="warning"] {
+      color: var(--warning-ink);
+      border-color: color-mix(in oklch, var(--warning), transparent 60%);
+      background-color: color-mix(in oklch, var(--warning), var(--surface) 92%);
+    }
+
+    &[data-tone="income"] {
+      color: var(--income);
+      border-color: color-mix(in oklch, var(--income), transparent 60%);
+      background-color: color-mix(in oklch, var(--income), var(--surface) 92%);
+    }
+
+    &[data-tone="expense"] {
+      color: var(--expense);
+      border-color: color-mix(in oklch, var(--expense), transparent 60%);
+      background-color: color-mix(in oklch, var(--expense), var(--surface) 92%);
+    }
+  }
+}

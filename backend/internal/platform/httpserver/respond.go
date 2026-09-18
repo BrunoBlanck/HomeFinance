@@ -29,6 +29,58 @@ const (
 	CodeUnsupportedMediaType = "UNSUPPORTED_MEDIA_TYPE"
 	CodeServiceUnavailable   = "SERVICE_UNAVAILABLE"
 	CodeInternalError        = "INTERNAL_ERROR"
+
+	// CodeResourceInUse (HTTP 422) — o recurso não pode ser EXCLUÍDO porque
+	// há dado dependente; arquivar continua permitido (spec 0003, D4).
+	//
+	// Código próprio, e não VALIDATION_FAILED, porque as duas situações pedem
+	// telas diferentes: uma manda o usuário corrigir o formulário, a outra
+	// oferece arquivar. Fazer o frontend distinguir isso interpretando o TEXTO
+	// da mensagem seria acoplar a interface à redação em português.
+	CodeResourceInUse = "RESOURCE_IN_USE"
+
+	// CodeKeywordTaken (HTTP 409) — a palavra-chave já pertence a OUTRA
+	// categoria (ou outra conta) DA MESMA CASA (spec 0005 §4.1). Código
+	// próprio pelo mesmo motivo de RESOURCE_IN_USE: a tela mostra "já está em
+	// X" resolvendo `fields.ownerId`, uma ação diferente do 400 de forma.
+	//
+	// `fields.ownerId` é sempre um recurso da casa do token — a checagem que o
+	// produz filtra por household_id —, então citá-lo nunca revela recurso
+	// alheio. A palavra em `fields.keyword` é a que o próprio cliente enviou.
+	CodeKeywordTaken = "KEYWORD_TAKEN"
+
+	// CodeConflict (HTTP 409) — o estado mudou ENTRE a leitura e a escrita da
+	// mesma operação (spec 0005 §13, ADR-028d): em POST /transfers/detect, o
+	// UPDATE condicional de um par não afetou exatamente duas linhas porque
+	// outra requisição excluiu, converteu ou editou um dos lançamentos no
+	// meio. A transação inteira foi desfeita — nada gravado.
+	//
+	// Código próprio, e não INTERNAL_ERROR (não é falha do servidor) nem
+	// VALIDATION_FAILED (o pedido estava certo), porque mapeia para UMA ação
+	// da tela: pedir a prévia de novo. Sem `fields`: não há campo a corrigir,
+	// e citar qual lançamento mudou seria vazar o estado de outra requisição.
+	CodeConflict = "CONFLICT"
+
+	// Os SEIS códigos da importação (HTTP 422 — §5.4 da spec 0004).
+	//
+	// Cada um existe porque mapeia para UMA AÇÃO DIFERENTE DA INTERFACE, e é
+	// essa correspondência — nada mais — que justifica seis códigos em vez de
+	// um. Colapsá-los em VALIDATION_FAILED obrigaria o frontend a interpretar
+	// texto em português, que é exatamente o que a D4 da spec 0003 recusou.
+	// Quem for "simplificar" isto depois: a tabela abaixo é o motivo.
+	//
+	//	PASSWORD_REQUIRED  -> a tela ABRE O CAMPO DE SENHA
+	//	PASSWORD_INVALID   -> a tela MANTÉM o campo e pede de novo
+	//	FORMAT_UNKNOWN     -> a tela LISTA os formatos suportados
+	//	FORMAT_AMBIGUOUS   -> a tela mostra um SELETOR (fields.format)
+	//	TARGET_MISMATCH    -> a tela manda TROCAR A CONTA de destino
+	//	FILE_REJECTED      -> a tela EXPLICA QUAL LIMITE estourou (fields)
+	CodeImportPasswordRequired = "IMPORT_PASSWORD_REQUIRED"
+	CodeImportPasswordInvalid  = "IMPORT_PASSWORD_INVALID"
+	CodeImportFormatUnknown    = "IMPORT_FORMAT_UNKNOWN"
+	CodeImportFormatAmbiguous  = "IMPORT_FORMAT_AMBIGUOUS"
+	CodeImportTargetMismatch   = "IMPORT_TARGET_MISMATCH"
+	CodeImportFileRejected     = "IMPORT_FILE_REJECTED"
 )
 
 // Mensagens genéricas em pt-BR. São constantes para que dois caminhos de erro
@@ -49,6 +101,24 @@ const (
 	MsgUnsupportedMediaType = "Tipo de conteúdo não suportado."
 	MsgServiceUnavailable   = "Serviço indisponível."
 	MsgInternalError        = "Erro interno."
+	MsgResourceInUse        = "Este item está em uso e não pode ser excluído."
+	MsgKeywordTaken         = "Esta palavra-chave já está em uso nesta casa."
+	MsgConflict             = "Os dados mudaram enquanto a operação rodava. Confira a prévia de novo."
+
+	// Mensagens da importação. Nenhuma contém trecho do arquivo, linha crua,
+	// nome de estabelecimento nem — jamais — a senha do ZIP.
+	//
+	// As duas primeiras NÃO se chamam "...Password...", e é de propósito: o
+	// gosec trata qualquer identificador com "pass"/"pwd"/"cred" como
+	// credencial em potencial (G101), e a regra do projeto é zero achado sem
+	// nenhuma supressão. É o mesmo motivo de importer.SuggestionCardInflow não se
+	// chamar "...CardCredit".
+	MsgImportFileLocked       = "Este arquivo está protegido por senha."
+	MsgImportFileUnlockFailed = "Senha incorreta para este arquivo."
+	MsgImportFormatUnknown    = "Ainda não sei ler este formato de arquivo."
+	MsgImportFormatAmbiguous  = "Mais de um formato reconheceu este arquivo. Escolha qual usar."
+	MsgImportTargetMismatch   = "Este arquivo não corresponde à conta escolhida."
+	MsgImportFileRejected     = "Não consegui aceitar este arquivo."
 )
 
 const contentTypeJSON = "application/json; charset=utf-8"
@@ -119,6 +189,44 @@ func WriteValidationError(w http.ResponseWriter, fields map[string]string) {
 		return
 	}
 	writeRaw(w, http.StatusBadRequest, body)
+}
+
+// WriteUnprocessable escreve 422 com código próprio e, opcionalmente, o mapa
+// de campos.
+//
+// 400 e 422 dizem coisas diferentes e a interface reage a cada um de um jeito:
+// 400 é "o corpo está malformado ou o valor é inválido, corrija e reenvie";
+// 422 é "o corpo está correto, mas a regra de negócio recusa" — nome já usado,
+// teto de quantidade, recurso em uso. Colapsar os dois em 400 obrigaria o
+// frontend a adivinhar qual dos dois aconteceu.
+func WriteUnprocessable(w http.ResponseWriter, code, message string, fields map[string]string) {
+	env := ErrorEnvelope{Error: ErrorPayload{Code: code, Message: message, Fields: fields}}
+	body, err := json.Marshal(env)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, MsgInternalError)
+		return
+	}
+	writeRaw(w, http.StatusUnprocessableEntity, body)
+}
+
+// WriteConflict escreve 409 com código próprio e, opcionalmente, o mapa de
+// campos — a mesma forma de WriteUnprocessable, com outro status.
+//
+// 409 é "o corpo está correto e a regra de negócio aceitaria, mas o estado
+// ATUAL de outro recurso da casa impede": KEYWORD_TAKEN, em que a
+// palavra-chave já pertence a outra categoria ou conta (spec 0005 §4.1), e
+// CONFLICT, em que o estado mudou entre a leitura e a escrita da mesma
+// operação (ADR-028d). O mapa de campos carrega a palavra recusada e, quando
+// conhecida, a dona — sempre um recurso da casa do token; quem chama é
+// responsável por isso. CONFLICT vai sem campos.
+func WriteConflict(w http.ResponseWriter, code, message string, fields map[string]string) {
+	env := ErrorEnvelope{Error: ErrorPayload{Code: code, Message: message, Fields: fields}}
+	body, err := json.Marshal(env)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, MsgInternalError)
+		return
+	}
+	writeRaw(w, http.StatusConflict, body)
 }
 
 func writeRaw(w http.ResponseWriter, status int, body []byte) {

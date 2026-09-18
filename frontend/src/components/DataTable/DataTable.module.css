@@ -1,0 +1,226 @@
+@layer components {
+  /* Só a TABELA rola na horizontal — nunca a página. Numa tela estreita, a
+     grade de valores precisa poder escorregar sem arrastar o layout junto. */
+  .scroll {
+    /* Bloco de contenção dos `.sr-only` (posição absoluta) das células. Sem
+       isto, o texto invisível de uma coluna que rolou para fora é medido
+       contra o DOCUMENTO e estica a página inteira na horizontal a 375px —
+       a tabela rolava dentro da moldura, e a página rolava junto. */
+    position: relative;
+    inline-size: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+
+    /* A moldura é um CONTAINER de consulta: `100cqi` passa a valer a largura
+       VISÍVEL da tabela, e não a largura que a tabela tem depois de esticar.
+       É o que permite ao cabeçalho de grupo (e ao select de decisão da
+       importação) se medirem pelo que a pessoa enxerga. */
+    container-type: inline-size;
+  }
+
+  .table {
+    /* O recuo lateral das células, num lugar só: o cabeçalho de grupo precisa
+       do MESMO valor para alinhar a caixa dele com o texto das linhas. */
+    --cell-pad: var(--space-4);
+
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-15);
+
+    /* `:where()` zera a especificidade da regra-base, então toda exceção
+       abaixo (tfoot, última linha, alinhamento) vence naturalmente, sem
+       precisar de seletor mais longo nem de !important. */
+    & :where(th, td) {
+      padding: var(--space-3) var(--cell-pad);
+      border-block-end: 1px solid var(--border);
+      text-align: start;
+      vertical-align: middle;
+    }
+
+    & :where(th) {
+      position: sticky;
+      inset-block-start: 0;
+      z-index: 1;
+      /* Fundo opaco é obrigatório num cabeçalho grudado: sem ele, as linhas
+         passam por baixo e o texto vira ilegível. */
+      background-color: var(--surface);
+      font-family: var(--font-ui);
+      font-size: var(--text-13);
+      font-weight: 600;
+      color: var(--ink-muted);
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+
+    & [data-align="end"] {
+      text-align: end;
+    }
+
+    & [data-width="min"] {
+      inline-size: 1%;
+      white-space: nowrap;
+    }
+
+    /* A coluna ELÁSTICA (`data-flex`, eleita pelo componente quando a tabela
+       tem uma única coluna `auto`). `max-inline-size: 0` é o que, num layout
+       automático, faz a coluna ficar com o espaço que SOBRA das outras em vez
+       de empurrá-las para fora da moldura — é ele que faz a reticência do
+       texto acontecer. Medido em 17/09/2026: sem esta linha, /lancamentos a
+       375px esticava a tabela a 791px dentro de uma moldura de 325px. */
+    & [data-flex] {
+      max-inline-size: 0;
+      /* Piso: elástica não quer dizer descartável. Sem ele, numa tabela que
+         não cabe de jeito nenhum (a revisão da importação a 375px), a sobra
+         negativa cai TODA aqui e a coluna vai a zero — o texto some em vez de
+         ganhar reticências. Chegando ao piso, quem cede é a moldura: ela rola,
+         que é para isso que existe. */
+      min-inline-size: 8rem;
+    }
+
+    /* Daqui até o fim do bloco, a especificidade cresce na ordem do arquivo —
+       tfoot, cabeçalho de grupo, linha arquivada, hover, última linha. Mantida
+       assim, ninguém precisa simular a cascata de cabeça para saber quem vence:
+       quem vem depois vence. */
+    & tfoot td,
+    & tfoot th {
+      border-block-start: 1px solid var(--border-strong);
+      border-block-end: none;
+      font-weight: 700;
+      background-color: var(--surface-sunken);
+    }
+
+    /* Linha de detalhe (docs/DESIGN.md, E2c (h)): o editor que abre "na
+       própria linha" em /lancamentos. Não é camada: nem barra lateral, nem
+       fundo recuado (`--surface-sunken` é do cabeçalho de dia — o editor não
+       pode parecer um), nem sombra, nem animação de altura. A linha aparece. */
+    & .detail > td {
+      padding: var(--space-2) var(--cell-pad) var(--space-4);
+      background-color: var(--surface);
+    }
+
+    /* Cabeçalho de grupo — o dia em /lancamentos, o motivo em /importar.
+       Não gruda no TOPO de propósito: dois elementos disputando a borda
+       superior brigariam pelo mesmo lugar, e quem precisa ficar lá é o
+       cabeçalho de coluna. */
+    & .groupHead > th {
+      position: static;
+      z-index: auto;
+      padding-block: var(--space-2);
+      background-color: var(--surface-sunken);
+      color: var(--ink);
+      font-weight: 400;
+      /* O rótulo pode ser longo ("Já importada e excluída · 1") e a descrição é
+         um parágrafo inteiro: aqui a quebra de linha é bem-vinda. */
+      white-space: normal;
+    }
+
+    /* Arquivada continua legível — apagada, não escondida. O estado também é
+       dito por texto na etiqueta; a opacidade é só reforço. */
+    & tbody tr[data-archived="true"] td {
+      opacity: 0.62;
+    }
+
+    /* A linha de detalhe e a linha dela são a MESMA linha: não há risco
+       entre as duas. */
+    & tbody tr:has(+ .detail) > td {
+      border-block-end: none;
+    }
+
+    /* O cabeçalho de grupo e a linha de detalhe não são linha de dado: não
+       acendem no hover. */
+    & tbody tr:not(.groupHead, .detail):hover td {
+      background-color: color-mix(in oklch, var(--accent), transparent 96%);
+    }
+
+    /* Sem zebra: a borda de 1px já separa as linhas, e faixa alternada some no
+       tema escuro e briga com o destaque de linha arquivada.
+
+       `tbody:last-of-type` porque a tabela agrupada tem um tbody por grupo: só
+       a última linha da tabela inteira dispensa a borda (a do painel faz o
+       fechamento). Dentro dela, o fim de cada grupo continua marcado — é o que
+       separa um dia do outro. */
+    & tbody:last-of-type tr:last-child td {
+      border-block-end: none;
+    }
+  }
+
+  /* A caixa do cabeçalho de grupo: larga como a MOLDURA, não como a tabela.
+     `100cqi` é a largura visível (`.scroll` é o container de consulta), então a
+     explicação do grupo quebra dentro do que a pessoa enxerga mesmo quando a
+     tabela é mais larga e rola. Antes ela acompanhava a largura da tabela e
+     nascia cortada a 375px.
+
+     `sticky` porque, numa tabela que rola, é a palavra do grupo que diz em que
+     situação a linha está — ela não pode escorregar para fora junto com as
+     colunas. Fica no eixo da linha: não gruda no topo (isso é do cabeçalho de
+     coluna), gruda no começo da moldura. */
+  .groupContent {
+    position: sticky;
+    inset-inline-start: var(--cell-pad);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    /* Largura fixa, e igual à da moldura: é ela que joga o subtotal na borda
+       direita do que se vê (`space-between`) e que dá à explicação do grupo uma
+       medida de leitura em vez da largura da tabela. */
+    inline-size: calc(100cqi - var(--cell-pad) * 2);
+  }
+
+  .groupText {
+    min-inline-size: 0;
+  }
+
+  /* O subtotal do dia. Encosta na borda direita da moldura — a mesma margem
+     das células de valor, que é o que ele soma. */
+  .groupTrailing {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .groupLabel {
+    display: block;
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .groupDescription {
+    display: block;
+    max-inline-size: 60ch;
+    margin-block-start: var(--space-1);
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 400;
+    line-height: 1.45;
+    letter-spacing: normal;
+    color: var(--ink-muted);
+  }
+
+  /* Grupo que traz explicação é um bloco com título, não um divisor de dia: o
+     rótulo sobe um degrau na escala para ancorar o parágrafo abaixo dele. */
+  .groupHead:has(.groupDescription) .groupLabel {
+    font-size: var(--text-15);
+  }
+
+  .emptyWrap {
+    padding: var(--space-2);
+  }
+
+  @media (max-width: 40rem) {
+    .table {
+      --cell-pad: var(--space-3);
+
+      /* Coluna que não cabe no celular sai da linha inteira de uma vez — th e
+         td juntos, senão a grade desalinha. */
+      & [data-hide="sm"] {
+        display: none;
+      }
+
+      & .detail > td {
+        padding: var(--space-2) var(--cell-pad) var(--space-3);
+      }
+    }
+  }
+}

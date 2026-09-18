@@ -146,8 +146,22 @@ describe('LoginScreen', () => {
           emailVerifiedAt: '2026-09-09T12:00:00Z',
           createdAt: '2026-09-09T12:00:00Z',
         },
-        household: { id: '22222222-2222-4222-8222-222222222222', name: 'Casa', role: 'owner' },
-        households: [{ id: '22222222-2222-4222-8222-222222222222', name: 'Casa', role: 'owner' }],
+        household: {
+          id: '22222222-2222-4222-8222-222222222222',
+          name: 'Casa',
+          role: 'owner',
+          timezone: 'America/Sao_Paulo',
+          currency: 'BRL',
+        },
+        households: [
+          {
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Casa',
+            role: 'owner',
+            timezone: 'America/Sao_Paulo',
+            currency: 'BRL',
+          },
+        ],
       }),
     )
     renderApp()

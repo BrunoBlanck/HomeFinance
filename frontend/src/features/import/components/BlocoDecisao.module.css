@@ -1,0 +1,19 @@
+@layer components {
+  .cabecalho {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* O apoio do bloco explica por que estas linhas foram barradas. Fica no corpo
+     do painel e não no subtítulo porque é um parágrafo, não uma legenda. */
+  .apoio {
+    max-inline-size: 72ch;
+    padding: var(--space-3) var(--space-4);
+    border-block-end: 1px solid var(--border);
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+}

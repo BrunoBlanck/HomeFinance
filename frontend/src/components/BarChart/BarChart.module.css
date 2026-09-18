@@ -1,0 +1,156 @@
+@layer components {
+  /* Plotagem, eixo, legenda e legenda escrita, empilhados. Container próprio: é
+     a LARGURA DELE que decide se todos os rótulos do eixo cabem — e assim a
+     regra também acerta quando a pessoa aumenta a fonte do navegador, que é
+     coisa que uma media query de viewport não vê. */
+  .figura {
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  /* `aspect-ratio: 2 / 1`, IDÊNTICO ao viewBox `0 0 480 240`: qualquer outra
+     proporção liga o `preserveAspectRatio` e a grade de 12 colunas do eixo
+     deixa de cair sobre os grupos. */
+  .plotagem {
+    inline-size: 100%;
+    aspect-ratio: 2 / 1;
+  }
+
+  .svg {
+    display: block;
+    inline-size: 100%;
+    block-size: 100%;
+  }
+
+  /* Cantos retos: raio em barra é decoração e distorce o valor nas baixas.
+     Sem traço — o vão entre as duas barras do par é geometria, não `stroke`.
+     `vector-effect: non-scaling-stroke` (no atributo) existe para o contorno de
+     `forced-colors` sair com 1 px em qualquer tamanho. */
+  .barra {
+    transition: opacity var(--motion-fast) var(--ease);
+
+    &[data-fill="1"] {
+      fill: var(--chart-1);
+    }
+
+    &[data-fill="3"] {
+      fill: var(--chart-3);
+    }
+  }
+
+  /* Carregando: as 24 barras a 40 % da altura, na cor-base do Skeleton (SVG não
+     recebe o background-image daquele componente). */
+  .barraVazia {
+    fill: var(--surface-sunken);
+  }
+
+  .base,
+  .viradaDeAno {
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+
+  /* O único feedback, e é o que anuncia que o `<title>` vem. Nenhuma animação
+     de ENTRADA: barra que "cresce" do chão é o clichê do dashboard genérico, e
+     aqui seria uma animação por mês, doze vezes, a cada troca de mês. */
+  @media (hover: hover) {
+    .barra:hover {
+      opacity: 0.82;
+    }
+  }
+
+  /* Eixo em HTML, alinhado por grade de 12 colunas iguais — a mesma divisão que
+     o viewBox faz nas colunas de 40. */
+  .eixo {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    list-style: none;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    text-align: center;
+  }
+
+  .legenda {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    list-style: none;
+
+    & li {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+  }
+
+  .nome {
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  .figcaption {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Estreito demais para doze rótulos: ficam seis, alternando **a partir do
+     FIM**. `visibility`, e não `display`, de propósito — a célula continua
+     ocupando a sua coluna, então a grade não se desloca e os rótulos que
+     sobraram seguem sob os seus grupos.
+
+     Contado do fim por uma razão só: o último rótulo é o MÊS SELECIONADO, que é
+     o assunto da tela e nunca pode ser o que some — `nth-child(even)` esconderia
+     exatamente a 12ª coluna. O que se perde é o rótulo do mês mais antigo, e o
+     período inteiro está na `caption` da tabela ao lado. Contar do fim também
+     sobrevive a uma série de tamanho ímpar e não deixa dois rótulos vizinhos na
+     ponta — que é o que `:not(:last-child)` faria.
+
+     Limiar: três letras a --text-13 medem ~21 px, então 12 células pedem ≥ 24 px
+     só para não colidir e ~28 px para ter ar. Abaixo de 24rem (384 px), seis
+     rótulos com passo de ~52 a 64 px leem melhor do que doze espremidos. É
+     consulta de CONTAINER e em `rem`, então o zoom de fonte também a dispara. */
+  @container (max-width: 24rem) {
+    .eixo li:nth-last-child(even) {
+      visibility: hidden;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .barra {
+      transition: none;
+    }
+  }
+
+  /* No alto contraste do sistema as duas séries continuam distintas sem cor
+     nenhuma: a 1 sólida, a 3 vazada com contorno. */
+  @media (forced-colors: active) {
+    .svg {
+      forced-color-adjust: none;
+    }
+
+    /* `[data-fill]` iguala a especificidade das regras da rampa acima; este
+       bloco vem depois no arquivo e vence. */
+    .barra[data-fill] {
+      fill: Canvas;
+      stroke: CanvasText;
+      stroke-width: 1;
+      opacity: 1;
+    }
+
+    .barra[data-fill="1"] {
+      fill: CanvasText;
+    }
+
+    .base,
+    .viradaDeAno {
+      stroke: CanvasText;
+    }
+
+    .barraVazia {
+      fill: CanvasText;
+    }
+  }
+}

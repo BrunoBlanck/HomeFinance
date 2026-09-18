@@ -1,0 +1,68 @@
+@layer components {
+  .navigator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .seta {
+    inline-size: var(--control-h-sm);
+    block-size: var(--control-h-sm);
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition:
+      background-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+
+    &:hover {
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+      color: var(--ink);
+    }
+  }
+
+  .rotulo {
+    min-inline-size: 11ch;
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    /* Tabular para o rótulo não mudar de largura entre "Maio" e "Setembro" e
+       fazer as setas dançarem. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hoje {
+    margin-inline-start: var(--space-2);
+    padding-inline: var(--space-2);
+    block-size: var(--control-h-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    cursor: pointer;
+
+    &:hover {
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+      color: var(--ink);
+    }
+  }
+
+  @media (max-width: 34rem) {
+    .rotulo {
+      min-inline-size: 9ch;
+      font-size: var(--text-13);
+    }
+
+    .hoje {
+      display: none;
+    }
+  }
+}

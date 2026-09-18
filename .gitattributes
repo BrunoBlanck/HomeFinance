@@ -1,0 +1,34 @@
+# Normalização de fim de linha — parte da DV6 (ruído de formatação em revisão).
+#
+# Por que este arquivo existe, com nome e sobrenome: a máquina de desenvolvimento
+# está com `core.autocrlf=true`. Sem `.gitattributes`, um clone novo no Windows
+# traz todo `.go` em CRLF; como o gofmt **sempre** escreve LF, o `gofmt -l .` do
+# `backend/scripts/check.ps1` passaria a acusar os 100+ arquivos como "fora de
+# formato" sem existir um único erro real de formatação. Fixar LF no working tree
+# resolve na origem e vale igual no Windows, no Linux e no CI.
+
+# Padrão: o Git decide o que é texto e mantém LF no repositório E no working tree.
+* text=auto eol=lf
+
+# Exceções — scripts que o interpretador da plataforma espera com CRLF.
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Binários: nunca converter, nunca tentar fazer diff de linha.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.avif   binary
+*.ico    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.otf    binary
+*.pdf    binary
+*.db     binary
+*.sqlite binary
+*.sqlite3 binary

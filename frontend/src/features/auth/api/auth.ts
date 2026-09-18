@@ -1,38 +1,34 @@
 import { apiRequest } from '@/api/client'
-import type { Session } from '@/lib/session'
+import type {
+  ForgotPasswordInput,
+  LoginInput,
+  RecoveryAccepted,
+  RegisterInput,
+  ResendCodeInput,
+  ResetPasswordInput,
+  Session,
+  VerificationAccepted,
+  VerifyEmailInput,
+} from '@/api/types'
 
-/** Resposta 202 de `register` e de `resend-code` — idêntica para e-mail novo, já
- *  cadastrado ou inexistente. É o backend recusando-se a enumerar contas. */
-export type VerificationAccepted = {
-  status: string
-  email: string
-  expiresInSeconds: number
-  /** ADR-014: amarra o código de 6 dígitos a ESTA tentativa de cadastro. Vem
-   *  sempre com 64 hexadecimais, em todos os caminhos, justamente para não
-   *  revelar qual deles o servidor tomou. Guardar é obrigação do cliente. */
-  registrationToken: string
-}
+/** Chamadas de autenticação. Nenhum tipo de payload é escrito aqui: todos vêm
+ *  de `@/api/types`, que os deriva de `backend/api/openapi.yaml` (ADR-015).
+ *  Campo que a spec não tem não compila; campo que a spec ganhou aparece
+ *  sozinho. */
 
-/** Resposta 202 de `forgot-password`. Corpo diferente de propósito: a
- *  redefinição de senha **não** usa `registrationToken` — o código dela é
- *  amarrado à conta, não a uma tentativa de cadastro. */
-export type RecoveryAccepted = {
-  status: string
-  message: string
-  expiresInSeconds: number
-}
+export type { RecoveryAccepted, VerificationAccepted }
 
-export function register(input: { name: string; email: string; password: string }) {
+export function register(input: RegisterInput) {
   return apiRequest<VerificationAccepted>('/auth/register', { method: 'POST', body: input })
 }
 
-export function login(input: { email: string; password: string }) {
+export function login(input: LoginInput) {
   return apiRequest<Session>('/auth/login', { method: 'POST', body: input })
 }
 
 /** O token é obrigatório: o backend procura o código DENTRO da tentativa que
  *  ele identifica. Sem o campo a resposta é 400 com `fields.registrationToken`. */
-export function verifyEmail(input: { email: string; code: string; registrationToken: string }) {
+export function verifyEmail(input: VerifyEmailInput) {
   return apiRequest<Session>('/auth/verify-email', { method: 'POST', body: input })
 }
 
@@ -43,14 +39,14 @@ export function verifyEmail(input: { email: string; code: string; registrationTo
  *  202 continua idêntico (grupo B da §3.12), mas nada é emitido; por isso o
  *  tipo exige o campo: quem não tem token não chama esta rota, refaz o
  *  cadastro. */
-export function resendCode(input: { email: string; registrationToken: string }) {
+export function resendCode(input: ResendCodeInput) {
   return apiRequest<VerificationAccepted>('/auth/resend-code', { method: 'POST', body: input })
 }
 
-export function forgotPassword(input: { email: string }) {
+export function forgotPassword(input: ForgotPasswordInput) {
   return apiRequest<RecoveryAccepted>('/auth/forgot-password', { method: 'POST', body: input })
 }
 
-export function resetPassword(input: { email: string; code: string; newPassword: string }) {
+export function resetPassword(input: ResetPasswordInput) {
   return apiRequest<void>('/auth/reset-password', { method: 'POST', body: input })
 }

@@ -1,0 +1,235 @@
+@layer components {
+  .shell {
+    min-block-size: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg);
+  }
+
+  .header {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-5);
+    background-color: var(--surface);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .mes {
+    display: flex;
+    justify-content: center;
+  }
+
+  .conta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    justify-self: end;
+  }
+
+  .casa {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    max-inline-size: 18ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .corpo {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 14rem 1fr;
+    align-items: start;
+  }
+
+  .nav {
+    position: sticky;
+    /* Abaixo do cabeçalho grudado. */
+    inset-block-start: 4.25rem;
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .navLista {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    list-style: none;
+  }
+
+  .navItem {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+    text-decoration: none;
+    transition:
+      background-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+
+    &:hover {
+      background-color: color-mix(in oklch, var(--accent), transparent 90%);
+      color: var(--ink);
+    }
+
+    /* A seção corrente é marcada por PESO e por uma barra à esquerda, além da
+       cor — estado comunicado só por cor é invisível para daltônico. E o
+       aria-current diz a mesma coisa para o leitor de tela. */
+    &[data-current="page"] {
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+      color: var(--accent);
+      font-weight: 600;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+  }
+
+  .main {
+    min-inline-size: 0;
+    padding: var(--space-5) var(--space-5) var(--space-8);
+  }
+
+  .aviso {
+    margin-block-end: var(--space-4);
+  }
+
+  /* Mobile: a navegação vira barra inferior, que é onde o polegar alcança. */
+  /* Sintaxe clássica, e não a de intervalo (`width <= 52rem`): o jsdom não
+     parseia a de intervalo e DESCARTA A FOLHA INTEIRA, o que faria os testes de
+     componente rodarem sem estilo nenhum e darem falso verde em asserção de
+     visibilidade. É também a convenção que o resto do projeto já usava. */
+  @media (max-width: 52rem) {
+    .header {
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        "marca conta"
+        "mes mes";
+      row-gap: var(--space-2);
+      padding-inline: var(--space-4);
+    }
+
+    .brand {
+      grid-area: marca;
+    }
+
+    .conta {
+      grid-area: conta;
+    }
+
+    .mes {
+      grid-area: mes;
+      justify-content: flex-start;
+    }
+
+    .corpo {
+      grid-template-columns: 1fr;
+    }
+
+    .nav {
+      position: fixed;
+      inset-block-end: 0;
+      inset-inline: 0;
+      inset-block-start: auto;
+      z-index: 20;
+      padding: var(--space-2);
+      /* `env()` respeita a barra de gestos do iPhone; sem isso, o último item
+         fica embaixo dela. */
+      padding-block-end: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+      background-color: var(--surface);
+      border-block-start: 1px solid var(--border);
+      /* A barra se mede a si mesma: o piso só-ícone lá embaixo decide pela
+         largura REAL disponível, não pela da janela — assim ele também acerta
+         quando a pessoa aumenta a fonte do navegador, que é coisa que uma media
+         query de viewport não vê. */
+      container-type: inline-size;
+    }
+
+    /* Colunas IGUAIS, e não `space-around`: com "Transferências" e
+       "Lançamentos" inteiros, os itens somam mais que 375px e a página inteira
+       passava a rolar na horizontal. Em grade, cada item recebe a mesma fração
+       da barra e o rótulo se ajusta a ele — nunca o contrário. */
+    .navLista {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0, 1fr);
+      gap: 2px;
+    }
+
+    .navItem {
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: var(--space-1);
+      min-inline-size: 0;
+      /* Zero, e não `var(--space-1)`: a célula inteira já é o alvo de toque, e
+         os 8px que sobravam nas laterais eram justamente os que faltavam ao
+         rótulo — com eles nem a sílaba cabia a 320px. */
+      padding-inline: 0;
+      font-size: var(--text-12);
+      text-align: center;
+
+      &[data-current="page"] {
+        box-shadow: inset 0 3px 0 var(--accent);
+      }
+    }
+
+    .navRotulo {
+      inline-size: 100%;
+      line-height: 1.15;
+      /* Duas linhas SEMPRE reservadas: a barra não muda de altura conforme a
+         palavra, e a primeira linha de todos os itens fica na mesma base. */
+      min-block-size: 2lh;
+      /* Quebra controlada: os pontos de quebra são os hifens suaves escritos no
+         rótulo (AppShell.tsx). `auto` depende de dicionário do navegador — o
+         Chromium daqui não tem pt-BR, e por isso a quebra saía sem hífen. */
+      hyphens: manual;
+      /* Rede de segurança, e só. NUNCA `anywhere`: ela abre oportunidade de
+         quebra em TODA letra e VENCE o hífen suave — foi o que produziu
+         "Transf/erênci/as". */
+      overflow-wrap: break-word;
+    }
+
+    /* Piso só-ícone: para quando nem a sílaba cabe (zoom 200%, fonte grande do
+       navegador, 280px). A fórmula, para o 8º item não precisar de arqueologia:
+
+         piso = N × 47px + (N − 1) × 2px
+
+       medido no CONTENT BOX da barra, que é o que a consulta de container mede.
+       47px é a largura de "Transfe-" a --text-12. Com N = 7: 329 + 12 = 341px =
+       21.3125rem (era 18.25rem para N = 6). É piso, não padrão: a 375px o
+       content box tem 359px e a célula fica com 49,6px — os rótulos continuam
+       visíveis; a 320px a célula cai a 41,7px e a barra vira só-ícone, ainda
+       muito acima do mínimo de 24px da WCAG 2.5.8. O nome segue no
+       `aria-label`, então nada se perde para quem não vê o ícone. */
+    @container (max-width: 21.3125rem) {
+      .navRotulo {
+        display: none;
+      }
+
+      /* 20px de ícone + 24px de respiro = 44px de alvo de toque. */
+      .navItem {
+        padding-block: var(--space-3);
+      }
+    }
+
+    .main {
+      /* Reserva EXATA pelo token, nunca um 3.5rem mágico: a barra a 84,6px mais
+         a safe area do iPhone (34px) passava do que estava reservado, e o fim
+         da tabela ficava debaixo dela. */
+      padding-block-end: calc(var(--space-6) + var(--nav-bar-h));
+    }
+  }
+}

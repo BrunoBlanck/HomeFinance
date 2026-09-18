@@ -1,0 +1,79 @@
+@layer components {
+  /* 40rem: é um formulário, e formulário largo tem campos largos que ninguém
+     consegue varrer. A revisão (passo 2) é que precisa da tela inteira. */
+  .pagina {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    max-inline-size: 40rem;
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-28);
+    font-weight: 600;
+    color: var(--ink);
+
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .apoio {
+    margin-block-start: var(--space-1);
+    max-inline-size: 56ch;
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  .campos {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .acoes {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .status {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    text-align: end;
+  }
+
+  /* A promessa do rodapé é sobre o dado da pessoa, e o backend a cumpre: o
+     arquivo nunca é escrito em disco, e as linhas de staging são apagadas
+     fisicamente no confirm e no descarte. */
+  .rodape {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Conteúdo do aviso de recuperação: a explicação, o seletor da conta certa e
+     o botão de criar, empilhados. Sem cor nova — a cor é a do próprio Alert. */
+  .recuperacao {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .recuperacaoAcoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  /* "Toque em Analisar arquivo de novo": o próximo passo, um degrau abaixo do
+     texto principal. */
+  .recuperacaoDica {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+}

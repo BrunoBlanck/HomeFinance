@@ -5,38 +5,46 @@
  *  Em desenvolvimento o Vite faz proxy de `/api`, então a origem é a mesma e o
  *  `SameSite=Strict` dos cookies continua valendo.
  *
- *  Nenhuma mensagem do servidor é repassada à interface: guardamos status, código
- *  e os NOMES dos campos inválidos; o texto sai sempre de `src/lib/errors.ts`. */
+ *  Nenhuma PROSA do servidor é repassada à interface: guardamos status, código, o
+ *  mapa estruturado `error.fields` (motivos como `expected_credit_card`, nunca
+ *  frases prontas) e os NOMES dos campos inválidos. O texto que o usuário lê sai
+ *  sempre de `src/lib/errors.ts` ou da própria tela, escolhido a partir desses
+ *  motivos. */
+
+import type { ApiErrorCode } from './types'
 
 const BASE_URL = '/api/v1'
 
-export type ApiErrorCode =
-  | 'VALIDATION_FAILED'
-  | 'INVALID_CREDENTIALS'
-  | 'INVALID_CODE'
-  | 'EMAIL_NOT_VERIFIED'
-  | 'UNAUTHENTICATED'
-  | 'INVALID_SESSION'
-  | 'FORBIDDEN'
-  | 'NOT_FOUND'
-  | 'METHOD_NOT_ALLOWED'
-  | 'RATE_LIMITED'
-  | 'PAYLOAD_TOO_LARGE'
-  | 'UNSUPPORTED_MEDIA_TYPE'
-  | 'SERVICE_UNAVAILABLE'
-  | 'INTERNAL_ERROR'
+/** Reexportado por conveniência de quem já importava daqui. A definição vem do
+ *  contrato OpenAPI (ADR-015), não desta camada. */
+export type { ApiErrorCode }
 
 export class ApiError extends Error {
   readonly status: number
   readonly code: ApiErrorCode | null
+  /** Só os NOMES dos campos inválidos — é o que os formulários usam para marcar
+   *  campo a campo. Continua sendo o 3º parâmetro do construtor: `fields` foi
+   *  acrescentado à parte, de forma aditiva, para não mexer nestes consumidores. */
   readonly invalidFields: readonly string[]
+  /** O mapa completo `campo → motivo` que o servidor mandou em `error.fields`,
+   *  já filtrado para os pares cujo valor é `string`. São dados ESTRUTURADOS que
+   *  o servidor já entregou (ex.: `{ reason: 'expected_credit_card' }`), não
+   *  prosa para exibir: a tela lê o motivo e escolhe a própria frase em pt-BR.
+   *  Renderizar sempre como texto — o React escapa. */
+  readonly fields: Readonly<Record<string, string>>
 
-  constructor(status: number, code: ApiErrorCode | null, invalidFields: readonly string[]) {
+  constructor(
+    status: number,
+    code: ApiErrorCode | null,
+    invalidFields: readonly string[] = [],
+    fields: Readonly<Record<string, string>> = {},
+  ) {
     super(`Resposta ${status} da API`)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.invalidFields = invalidFields
+    this.fields = fields
   }
 }
 
@@ -49,6 +57,8 @@ export class NetworkError extends Error {
 
 export type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  /** Objeto qualquer vira JSON. `FormData` vai como está — é assim que o envio
+   *  de arquivo do importador de extratos trafega. */
   body?: unknown
   signal?: AbortSignal
 }
@@ -75,7 +85,14 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     credentials: 'include',
     headers,
   }
-  if (options.body !== undefined) {
+  if (options.body instanceof FormData) {
+    // O `Content-Type` de um multipart carrega o `boundary`, e só o navegador
+    // sabe qual é — ele o gera na hora de serializar o FormData, e SÓ se o
+    // header ainda não estiver preenchido. Definir "application/json" (ou até
+    // "multipart/form-data" sem boundary) aqui faz o servidor receber um corpo
+    // que não consegue separar em partes: 400 sem nenhuma pista do motivo.
+    init.body = options.body
+  } else if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(options.body)
   }
@@ -116,6 +133,7 @@ function parseErrorCode(value: unknown): ApiErrorCode | null {
 
 async function toApiError(response: Response): Promise<ApiError> {
   let code: ApiErrorCode | null = null
+  let fields: Record<string, string> = {}
   let invalidFields: string[] = []
   try {
     const payload: unknown = await response.json()
@@ -123,14 +141,31 @@ async function toApiError(response: Response): Promise<ApiError> {
       const detail = (payload as { error: unknown }).error
       if (detail && typeof detail === 'object') {
         code = parseErrorCode((detail as { code?: unknown }).code)
-        const fields = (detail as { fields?: unknown }).fields
-        if (fields && typeof fields === 'object') invalidFields = Object.keys(fields)
+        const bruto = (detail as { fields?: unknown }).fields
+        if (bruto && typeof bruto === 'object') {
+          // `invalidFields` guarda TODAS as chaves (o nome do campo é o que os
+          // formulários marcam); `fields` guarda só os valores string, que é o
+          // que a tela consegue interpretar como motivo.
+          invalidFields = Object.keys(bruto)
+          fields = apenasStrings(bruto as Record<string, unknown>)
+        }
       }
     }
   } catch {
     // Corpo ausente ou ilegível: o status já basta para escolher a mensagem.
   }
-  return new ApiError(response.status, code, invalidFields)
+  return new ApiError(response.status, code, invalidFields, fields)
+}
+
+/** Só os pares cujo valor é `string`. O servidor manda `fields` como
+ *  `campo → motivo`; um valor que não é texto seria payload inesperado e a tela
+ *  não teria o que fazer com ele. */
+function apenasStrings(origem: Record<string, unknown>): Record<string, string> {
+  const saida: Record<string, string> = {}
+  for (const [chave, valor] of Object.entries(origem)) {
+    if (typeof valor === 'string') saida[chave] = valor
+  }
+  return saida
 }
 
 async function readBody<T>(response: Response): Promise<T> {

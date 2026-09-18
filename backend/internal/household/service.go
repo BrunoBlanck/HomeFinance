@@ -6,13 +6,27 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/brunorblanck/homefinance/backend/internal/civil"
 	"github.com/brunorblanck/homefinance/backend/internal/id"
 )
+
+// Seeder popula uma casa recém-criada.
+//
+// Interface declarada aqui, no consumidor: é o que permite este pacote semear
+// categorias sem depender do pacote de categorias. Quem implementa é
+// category.Service, ligado em cmd/api/main.go.
+type Seeder interface {
+	// SeedDefaults roda DENTRO da transação que cria a casa. Não deve abrir
+	// transação própria, e precisa ser idempotente — EnsureDefault também roda
+	// como auto-reparo no login.
+	SeedDefaults(ctx context.Context, householdID string) error
+}
 
 // Service concentra a regra de negócio das casas.
 type Service struct {
 	households  Repository
 	memberships MembershipRepository
+	seeders     []Seeder
 	ids         id.Generator
 	clock       func() time.Time
 }
@@ -25,6 +39,12 @@ func WithIDs(g id.Generator) Option { return func(s *Service) { s.ids = g } }
 
 // WithClock injeta o relógio (teste).
 func WithClock(c func() time.Time) Option { return func(s *Service) { s.clock = c } }
+
+// WithSeeders registra quem popula a casa nova. Na E1 é a semente de
+// categorias (D5); entregas futuras podem somar as suas.
+func WithSeeders(seeders ...Seeder) Option {
+	return func(s *Service) { s.seeders = append(s.seeders, seeders...) }
+}
 
 // NewService monta o serviço.
 func NewService(households Repository, memberships MembershipRepository, opts ...Option) *Service {
@@ -65,8 +85,12 @@ func (s *Service) EnsureDefault(ctx context.Context, userID, userName string) (S
 
 	now := s.clock()
 	h := &Household{
-		ID:        s.ids(),
-		Name:      DefaultName(userName),
+		ID:   s.ids(),
+		Name: DefaultName(userName),
+		// Fuso e moeda nascem no padrão (ADR-019). O fuso é editável pela
+		// casa; a moeda é BRL fixo no v1 e não é exposta para escrita.
+		Timezone:  DefaultTimezone,
+		Currency:  DefaultCurrency,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -86,7 +110,16 @@ func (s *Service) EnsureDefault(ctx context.Context, userID, userName string) (S
 		return Summary{}, fmt.Errorf("criando vínculo de dono: %w", err)
 	}
 
-	return Summary{ID: h.ID, Name: h.Name, Role: m.Role}, nil
+	// A semente roda na MESMA transação (S10 do PLANOS.md): sem FK física
+	// (ADR-013), uma casa que nasce com metade das categorias é um estado que
+	// o banco não barra, e que ninguém percebe até faltar uma categoria.
+	for _, seeder := range s.seeders {
+		if err := seeder.SeedDefaults(ctx, h.ID); err != nil {
+			return Summary{}, fmt.Errorf("semeando casa nova: %w", err)
+		}
+	}
+
+	return Summary{ID: h.ID, Name: h.Name, Role: m.Role, Timezone: h.Timezone, Currency: h.Currency}, nil
 }
 
 // Active devolve a casa ativa do usuário: a do vínculo MAIS ANTIGO (D18).
@@ -137,7 +170,7 @@ func (s *Service) ListForUser(ctx context.Context, userID string) ([]Summary, er
 			// fantasma para o cliente.
 			continue
 		}
-		out = append(out, Summary{ID: h.ID, Name: h.Name, Role: m.Role})
+		out = append(out, Summary{ID: h.ID, Name: h.Name, Role: m.Role, Timezone: h.Timezone, Currency: h.Currency})
 	}
 	return out, nil
 }
@@ -160,5 +193,20 @@ func (s *Service) MembershipOf(ctx context.Context, userID, householdID string) 
 	if err != nil {
 		return Summary{}, err
 	}
-	return Summary{ID: h.ID, Name: h.Name, Role: m.Role}, nil
+	return Summary{ID: h.ID, Name: h.Name, Role: m.Role, Timezone: h.Timezone, Currency: h.Currency}, nil
+}
+
+// Today devolve o dia de hoje NO FUSO DA CASA.
+//
+// Existe como método de serviço, e não como helper solto, porque é a ÚNICA
+// porta pela qual o resto do sistema pergunta "que dia é hoje?" (ADR-019 e
+// risco R6 do PLANOS.md). Espalhar `time.Now()` pelos domínios é como o bug
+// de "a conta venceu um dia antes" entra: às 21h em São Paulo já é o dia
+// seguinte em UTC.
+func (s *Service) Today(ctx context.Context, householdID string) (civil.Date, error) {
+	h, err := s.households.ByID(ctx, householdID)
+	if err != nil {
+		return civil.Date{}, err
+	}
+	return civil.FromTime(s.clock(), h.Location()), nil
 }

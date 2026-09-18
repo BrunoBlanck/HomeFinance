@@ -1,0 +1,76 @@
+@layer components {
+  .wrap {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-2);
+
+    & input {
+      /* Dígitos tabulares aqui também: sem eles o número "pula" na tela a cada
+         tecla, porque o 1 é mais estreito que o 8. */
+      font-variant-numeric: tabular-nums slashed-zero;
+      font-family: var(--font-display);
+      font-size: var(--text-18);
+      /* Alinhado à direita: é assim que o valor cresce da direita para a
+         esquerda enquanto se digita, que é a promessa da entrada
+         centavos-primeiro. */
+      text-align: end;
+      padding-inline-start: var(--space-7);
+    }
+
+    & input[data-negative] {
+      color: var(--expense);
+    }
+  }
+
+  .moeda {
+    position: absolute;
+    inset-block-start: 50%;
+    translate: 0 -50%;
+    inset-inline-start: var(--space-3);
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 600;
+    color: var(--ink-muted);
+    pointer-events: none;
+  }
+
+  /* Quando há botão de sinal, o "R$" acompanha o campo, que já não começa na
+     borda do contêiner. */
+  .sinal ~ .moeda {
+    inset-inline-start: calc(var(--control-h) + var(--space-2) + var(--space-3));
+  }
+
+  .sinal {
+    flex: none;
+    inline-size: var(--control-h);
+    min-block-size: var(--control-h);
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-strong);
+    border-block-end-width: 2px;
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-sunken);
+    color: var(--ink-muted);
+    font-size: var(--text-22);
+    line-height: 1;
+    cursor: pointer;
+    transition:
+      background-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+
+    &:hover {
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    }
+
+    /* Ativado = o valor está negativo. O botão fica pintado com o vermelho de
+       despesa, e o estado também é anunciado por aria-pressed — cor sozinha
+       nunca comunica estado. */
+    &[aria-pressed="true"] {
+      background-color: color-mix(in oklch, var(--expense), var(--surface) 88%);
+      border-color: var(--expense);
+      color: var(--expense);
+      font-weight: 700;
+    }
+  }
+}

@@ -82,6 +82,12 @@ func Open(ctx context.Context, opts Options, lg *slog.Logger) (*DB, error) {
 		return nil, fmt.Errorf("abrindo banco (%s): %w", opts.Driver, scrub(err, opts.DSN))
 	}
 
+	// Ao lado do TranslateError acima, e pelo mesmo motivo: é aqui que erro de
+	// DRIVER vira erro que o resto do código entende. Ver ctxerr.go.
+	if err := instalarErroDeContexto(gdb); err != nil {
+		return nil, scrub(err, opts.DSN)
+	}
+
 	sqlDB, err := gdb.DB()
 	if err != nil {
 		return nil, fmt.Errorf("obtendo pool: %w", scrub(err, opts.DSN))
@@ -111,6 +117,11 @@ func New(gdb *gorm.DB) (*DB, error) {
 	sqlDB, err := gdb.DB()
 	if err != nil {
 		return nil, fmt.Errorf("obtendo pool: %w", err)
+	}
+	// A mesma tradução de prazo e cancelamento do Open: um teste que a
+	// perdesse aprovaria a regressão que ela existe para barrar.
+	if err := instalarErroDeContexto(gdb); err != nil {
+		return nil, err
 	}
 	return &DB{gdb: gdb, sql: sqlDB}, nil
 }

@@ -1,0 +1,46 @@
+@layer components {
+  .form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* Fechamento e vencimento só existem em cartão, e o `<fieldset>` diz isso
+     estruturalmente: o leitor de tela anuncia "Fatura do cartão" ao entrar nos
+     dois campos, então a condição que os fez aparecer não fica só no visual.
+
+     Fundo transparente de propósito — os campos já são `--surface-sunken`, e
+     pintar a caixa com o mesmo tom faria os controles sumirem dentro dela. */
+  .fatura {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .legenda {
+    padding-inline: var(--space-1);
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .explicacao {
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+    text-wrap: pretty;
+  }
+
+  /* Dois campos de dois dígitos lado a lado: empilhados, esticariam o diálogo
+     por duas linhas para caber "03" e "10". */
+  .dias {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+}

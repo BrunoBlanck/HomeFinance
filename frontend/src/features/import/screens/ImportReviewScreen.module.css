@@ -1,0 +1,102 @@
+@layer components {
+  /* 76rem: a revisão é a única tela larga da entrega. Cinco colunas com um
+     <select> de decisão em duas delas não cabem nas 62rem das outras. */
+  .pagina {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    max-inline-size: 76rem;
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-28);
+    font-weight: 600;
+    color: var(--ink);
+
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .contexto {
+    margin-block-start: var(--space-1);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  .contagemDosBlocos {
+    margin-block-start: var(--space-1);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .carregando {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-6) 0;
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  /* A barra de confirmação gruda no rodapé da janela, e se separa do conteúdo
+     por BORDA — nunca por sombra. Ela não é uma camada flutuante sobre a
+     página: é o rodapé do documento, e sombra aqui seria a "cara de template"
+     que o docs/DESIGN.md recusa. */
+  .barra {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    background-color: var(--surface);
+    border-block-start: 1px solid var(--border);
+    box-shadow: none;
+  }
+
+  .nuance {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .acoesDaBarra {
+    display: flex;
+    gap: var(--space-2);
+    margin-inline-start: auto;
+    flex-wrap: wrap;
+  }
+
+  .corpoDoDialogo {
+    max-inline-size: 48ch;
+    font-size: var(--text-15);
+    line-height: 1.55;
+    color: var(--ink);
+  }
+
+  @media (max-width: 40rem) {
+    /* Os dois botões empilham, na ordem do DOM (cancelar em cima, confirmar
+       embaixo, perto do polegar). O rótulo do confirmar cresce com o que ele
+       promete — "Importar 42 lançamentos · 2 vinculados · 6 ignorados" — e
+       não cabe em 375px numa linha só: aqui, e só aqui, ele quebra. */
+    .acoesDaBarra {
+      inline-size: 100%;
+      flex-direction: column;
+      align-items: stretch;
+      margin-inline-start: 0;
+    }
+
+    .acoesDaBarra button > span {
+      white-space: normal;
+    }
+  }
+}

@@ -165,11 +165,30 @@ type Config struct {
 	Mail   MailConfig
 	SMTP   SMTPConfig
 
-	// RateLimits não vem de ambiente de propósito: são limites de segurança,
-	// não sintonia operacional. Afrouxá-los exige mudança de código revisada
-	// (a §7 da spec 0001 fixa os padrões).
+	// RateLimitProfile é o ÚNICO interruptor de ambiente sobre os limites de
+	// abuso (decisão do usuário, 17/09/2026). Valores: "default" (produção, e o
+	// padrão quando a variável não existe) e "test" (perfil frouxo da suíte
+	// automatizada).
+	//
+	// Por que um interruptor de CONJUNTO e não uma variável por regra: um
+	// `RATE_LIMIT_IMPORT_UPLOAD=9999` esquecido num manifesto é indistinguível
+	// de configuração legítima e não aparece em revisão nenhuma. Um perfil
+	// nomeado é uma decisão visível, com uma trava só — e a trava está em
+	// validate(): `test` em produção NÃO sobe.
+	RateLimitProfile string `env:"RATE_LIMITS_PROFILE" envDefault:"default"`
+
+	// RateLimits NÃO vem regra a regra do ambiente, de propósito: são limites
+	// de segurança, não sintonia operacional. O conjunto inteiro é escolhido
+	// por RateLimitProfile e, sem ele, é exatamente DefaultRateLimits() (a §7
+	// da spec 0001 fixa os padrões). Mudar um valor de produção continua
+	// exigindo mudança de código revisada.
 	RateLimits RateLimits
 }
+
+// UsesLooseRateLimits informa se o perfil FROUXO de limites está ativo. O boot
+// usa isto para avisar em Warn — um servidor com os tetos de abuso afrouxados
+// não pode passar despercebido no log.
+func (c Config) UsesLooseRateLimits() bool { return c.RateLimitProfile == RateLimitProfileTest }
 
 // IsProduction informa se a aplicação está em produção.
 func (c Config) IsProduction() bool { return c.AppEnv == EnvProduction }
@@ -187,6 +206,9 @@ func (c Config) LogValue() slog.Value {
 		// só um booleano de diagnóstico.
 		slog.Bool("https_only", c.Cookie.Secure),
 		slog.Bool("automigrate", c.DB.AutoMigrate),
+		// Visível em toda linha que loga a config: quem lê o log de um
+		// servidor sabe, sem investigar, se ele está com os tetos frouxos.
+		slog.String("rate_limits_profile", c.RateLimitProfile),
 	)
 }
 
@@ -216,11 +238,17 @@ func LoadFrom(environ map[string]string) (Config, error) {
 	cfg.Log.Level = strings.ToLower(strings.TrimSpace(cfg.Log.Level))
 	cfg.Log.Format = strings.ToLower(strings.TrimSpace(cfg.Log.Format))
 	cfg.HTTP.CORSOrigins = normalizeOrigins(cfg.HTTP.CORSOrigins)
-	cfg.RateLimits = DefaultRateLimits()
-
+	cfg.RateLimitProfile = strings.ToLower(strings.TrimSpace(cfg.RateLimitProfile))
+	if cfg.RateLimitProfile == "" {
+		cfg.RateLimitProfile = RateLimitProfileDefault
+	}
+	// A escolha acontece DEPOIS da validação passar: config inválida não
+	// devolve Config nenhuma, então não existe estado intermediário com o
+	// perfil frouxo montado num ambiente que o recusa.
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
+	cfg.RateLimits = profileRateLimits(cfg.RateLimitProfile)
 	return cfg, nil
 }
 
@@ -250,6 +278,28 @@ func (c Config) validate() error {
 	case EnvDevelopment, EnvTest, EnvProduction:
 	default:
 		add("APP_ENV deve ser development, test ou production")
+	}
+
+	// Perfil de limites: só os dois nomes existem. Um valor desconhecido é
+	// FALHA e não "cai no padrão em silêncio" — quem digitou "testing" quis
+	// afrouxar e precisa descobrir que não afrouxou.
+	switch c.RateLimitProfile {
+	case RateLimitProfileDefault, RateLimitProfileTest:
+	default:
+		add("RATE_LIMITS_PROFILE deve ser %q ou %q", RateLimitProfileDefault, RateLimitProfileTest)
+	}
+
+	// O perfil frouxo exige APP_ENV=test, e não apenas "não ser produção"
+	// (achado B2 da revisão de segurança). EnvTest existia na allowlist de
+	// ambientes e não governava nada; amarrar os dois interruptores fecha o
+	// caminho em que alguém sobe uma instância de desenvolvimento exposta —
+	// ou um ambiente rotulado development em infraestrutura de verdade — com
+	// TODOS os limites de abuso elevados. A trava específica de produção
+	// continua logo abaixo, com a sua própria mensagem: duas barreiras, e a
+	// que falhar primeiro já diz o motivo certo.
+	if c.RateLimitProfile == RateLimitProfileTest && c.AppEnv != EnvTest {
+		add("RATE_LIMITS_PROFILE=%s só é aceito com APP_ENV=%s (é o perfil da suíte automatizada, "+
+			"que eleva TODOS os limites de abuso — docs/SEGURANCA.md §5)", RateLimitProfileTest, EnvTest)
 	}
 
 	// Segredos: piso de 32 bytes em QUALQUER ambiente (D8).
@@ -381,6 +431,13 @@ func (c Config) validate() error {
 		}
 		if c.DB.Driver == DriverSQLite {
 			add("DB_DRIVER=sqlite não é aceito em produção")
+		}
+		// A trava do perfil frouxo. Mesma família do MAILER=console: um
+		// recurso que só faz sentido em teste não pode simplesmente "estar
+		// ligado" em produção — o boot morre, alto, com o motivo.
+		if c.RateLimitProfile == RateLimitProfileTest {
+			add("RATE_LIMITS_PROFILE=%s não é aceito em produção — é o perfil de teste, "+
+				"que afrouxa TODOS os limites de abuso (docs/SEGURANCA.md §5)", RateLimitProfileTest)
 		}
 	}
 

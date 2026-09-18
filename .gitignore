@@ -1,3 +1,8 @@
+# Extratos e faturas reais usados como amostra de formato.
+# Contêm nome, agência, conta, CNPJ e valores reais — NUNCA versionar.
+# Fixture de teste é cópia ANONIMIZADA, em internal/importer/*/testdata/.
+Exemplos/
+
 # Segredos e configuração local — NUNCA versionar
 .env
 .env.*
@@ -19,6 +24,12 @@ frontend/node_modules/
 frontend/dist/
 frontend/coverage/
 *.log
+
+# Playwright (artefatos de execucao; a configuracao e os testes sao versionados)
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
 
 # Bancos locais
 *.db

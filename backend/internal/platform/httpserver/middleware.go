@@ -156,3 +156,47 @@ func MaxBytes(limit int64) Middleware {
 		})
 	}
 }
+
+// MaxBytesByPath limita o corpo com um teto PADRÃO e uma tabela de exceções
+// por caminho EXATO.
+//
+// Por que não basta embrulhar de novo dentro da rota: MaxBytes está na cadeia
+// GLOBAL, antes do mux, e um segundo http.MaxBytesReader mais largo lá dentro
+// não afrouxa nada — quem corta é o interno, que já é o de 1 MiB. As saídas
+// eram (a) subir o teto global, inaceitável porque abriria 8 MiB em todas as
+// rotas de autenticação, ou (b) a cadeia global consultar uma tabela explícita.
+// Esta é a (b): a tabela é DADO, revisável numa olhada (spec 0004 §6.4).
+//
+// ⚠️ A comparação é EXATA, sem prefixo e sem curinga, e isso é a defesa: com
+// prefixo, "/api/v1/importsXYZ" herdaria o teto de 8 MiB, e qualquer caminho
+// novo abaixo de "/api/v1/imports/" herdaria junto. Qualquer variação de
+// grafia — barra no fim, caminho não normalizado, maiúsculas — simplesmente
+// não casa e cai no teto MENOR, que é a direção segura de errar.
+//
+// Tabela vazia (ou nil) equivale a MaxBytes(padrao).
+func MaxBytesByPath(padrao int64, excecoes map[string]int64) Middleware {
+	// Cópia defensiva: a tabela é montada na composição e não pode mudar
+	// depois que o servidor subiu. Um mapa compartilhado seria uma corrida de
+	// leitura/escrita esperando acontecer.
+	tabela := make(map[string]int64, len(excecoes))
+	for caminho, limite := range excecoes {
+		if limite > 0 {
+			tabela[caminho] = limite
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			limite := padrao
+			if especifico, ok := tabela[r.URL.Path]; ok {
+				limite = especifico
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limite)
+			next.ServeHTTP(w, r)
+		})
+	}
+}

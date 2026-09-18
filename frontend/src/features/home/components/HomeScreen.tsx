@@ -1,9 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
-import { Alert } from '@/components/Alert/Alert'
 import { FlashAlert } from '@/components/Alert/FlashAlert'
-import { Button } from '@/components/Button/Button'
 import { ArrowRightIcon } from '@/components/icons/ArrowRightIcon'
 import { CheckIcon } from '@/components/icons/CheckIcon'
 import { Panel } from '@/components/Panel/Panel'
@@ -11,7 +9,6 @@ import { Skeleton } from '@/components/Skeleton/Skeleton'
 import { isUnauthenticated } from '@/lib/errors'
 import { firstName, formatFullDate } from '@/lib/format'
 import { sessionQueryOptions } from '@/lib/session'
-import { AppHeader } from './AppHeader'
 import styles from './HomeScreen.module.css'
 import { LedgerPreview } from './LedgerPreview'
 
@@ -19,14 +16,10 @@ const WORKING = [
   'Criar conta com e-mail confirmado por código',
   'Entrar e sair com sessão segura',
   'Recuperar a senha pelo mesmo código de 6 dígitos',
+  'Contas e categorias da casa',
 ]
 
-const NEXT = [
-  'Contas e categorias',
-  'Lançamentos do mês',
-  'Contas que vencem',
-  'Orçamentos e relatórios',
-]
+const NEXT = ['Lançamentos do mês', 'Contas que vencem', 'Orçamentos e relatórios']
 
 export function HomeScreen() {
   const navigate = useNavigate()
@@ -49,13 +42,9 @@ export function HomeScreen() {
     }
   }, [session.isError, session.error, navigate])
 
-  const failed = session.isError && !isUnauthenticated(session.error)
-
   return (
     <div className={styles.page}>
-      <AppHeader session={session.data} />
-
-      <main className={styles.body}>
+      <div className={styles.body}>
         {flash ? (
           <div className={styles.flash}>
             <FlashAlert flash={flash} />
@@ -78,19 +67,9 @@ export function HomeScreen() {
 
           {session.isPending ? <Skeleton width="180px" height="0.9375rem" /> : null}
           {session.data ? <p className={styles.date}>{formatFullDate(new Date())}</p> : null}
-          {failed ? (
-            <Alert
-              tone="error"
-              title="Não foi possível carregar sua conta."
-              action={
-                <Button onClick={() => void session.refetch()} loading={session.isFetching}>
-                  Tentar de novo
-                </Button>
-              }
-            >
-              Verifique sua conexão e tente de novo.
-            </Alert>
-          ) : null}
+          {/* Falha de sessão NÃO é reportada aqui: quem avisa é a casca, que é
+              quem depende da sessão. A saudação simplesmente degrada para
+              "Olá." — dois avisos para o mesmo problema é ruído. */}
         </section>
 
         <div className={styles.grid}>
@@ -136,7 +115,7 @@ export function HomeScreen() {
             </ul>
           </Panel>
         </div>
-      </main>
+      </div>
     </div>
   )
 }

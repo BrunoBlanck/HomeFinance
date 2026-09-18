@@ -24,9 +24,26 @@
     --warning-ink: oklch(47.1% 0.099 76.3);
     --danger: var(--expense);
 
+    /* Gráficos (E6a, docs/DESIGN.md) — DERIVADOS, não são cor nova: a rampa de
+       tinta das fatias, da maior (tinta cheia) para a menor (tinta lavada), e o
+       alias da fatia "Sem categoria" (pendência = --warning, como em E2).
+       Declarados uma vez: como saem de --ink, --surface e --warning, os blocos
+       escuros abaixo já os recalculam sozinhos — e cada tema foi validado em
+       separado com scripts/validate_palette.js da skill dataviz (ver o doc).
+       Só entram em MARCA de gráfico (fatia, barra, amostra); texto nunca. */
+    --chart-1: var(--ink);
+    --chart-2: color-mix(in oklch, var(--ink), var(--surface) 22%);
+    --chart-3: color-mix(in oklch, var(--ink), var(--surface) 44%);
+    --chart-4: color-mix(in oklch, var(--ink), var(--surface) 66%);
+    --chart-pending: var(--warning);
+
     /* Tipografia */
     --font-display: "Fraunces", Georgia, "Times New Roman", serif;
     --font-ui: "Public Sans", system-ui, "Segoe UI", sans-serif;
+    /* Excecao unica da escala (docs/DESIGN.md): rotulo da barra de navegacao
+       inferior do celular, e nada mais. A 13px, seis itens a 320px nao cabem em
+       duas linhas — e tres linhas num item foi o defeito que originou a emenda. */
+    --text-12: 0.75rem;
     --text-13: 0.8125rem;
     --text-15: 0.9375rem;
     --text-18: 1.125rem;
@@ -43,6 +60,9 @@
     --space-6: 32px;
     --space-7: 48px;
     --space-8: 64px;
+    /* Altura da barra de navegacao inferior. 0 no desktop, de proposito: quem
+       reserva folga na base do viewport soma este token sem nenhum `if`. */
+    --nav-bar-h: 0px;
     --radius-sm: 6px;
     --radius-md: 10px;
     --control-h: 2.75rem;
@@ -55,6 +75,26 @@
     --shadow-layer: 0 4px 16px rgb(0 0 0 / 12%);
     --focus-ring: 2px solid var(--accent);
     --focus-offset: 2px;
+  }
+
+  /* Altura REAL da barra inferior, no unico lugar em que ela existe. Fica fora
+     dos blocos de tema porque e medida, nao cor.
+     2x8 (padding da barra) + 2x8 (padding-block do item) + 20 (icone) + 4 (gap)
+     + 2 linhas de --text-12 a 1.15 (27,6) + 1 (borda) = 84,6px a root de 16px.
+     A safe area entra AQUI para nao ser esquecida por quem reserva folga. */
+  @media (max-width: 52rem) {
+    :root {
+      --nav-bar-h: calc(
+        4 *
+        var(--space-2) +
+        20px +
+        var(--space-1) +
+        2.3 *
+        var(--text-12) +
+        1px +
+        env(safe-area-inset-bottom, 0px)
+      );
+    }
   }
 
   /* Escuro automático quando o usuário não escolheu manualmente. */
@@ -96,5 +136,16 @@
     --expense: oklch(69.1% 0.161 26.6);
     --warning: oklch(74.6% 0.132 79.3);
     --warning-ink: oklch(74.6% 0.132 79.3);
+  }
+
+  /* Quem pede mais contraste recebe toda fatia >= 3:1 sobre a superfície
+     (medido: 3,14:1 claro / 3,52:1 escuro na 4ª). O preço é menos separação
+     entre vizinhas (ΔE 13 em vez de 16) — a ordem e a legenda continuam. */
+  @media (prefers-contrast: more) {
+    :root {
+      --chart-2: color-mix(in oklch, var(--ink), var(--surface) 18%);
+      --chart-3: color-mix(in oklch, var(--ink), var(--surface) 36%);
+      --chart-4: color-mix(in oklch, var(--ink), var(--surface) 54%);
+    }
   }
 }

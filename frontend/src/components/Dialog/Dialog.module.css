@@ -1,0 +1,97 @@
+@layer components {
+  .dialog {
+    /* O <dialog> nativo vem com border, padding e max-* do agente; zeramos para
+       o painel de dentro mandar no visual. */
+    padding: 0;
+    border: none;
+    background: transparent;
+    max-inline-size: min(34rem, calc(100vw - var(--space-5) * 2));
+    inline-size: 100%;
+    max-block-size: calc(100dvh - var(--space-5) * 2);
+    color: var(--ink);
+
+    &::backdrop {
+      /* Sem blur: glassmorphism está na lista de rejeição do design system. */
+      background-color: oklch(0% 0 0 / 45%);
+    }
+
+    /* Camada realmente flutuante — um dos dois lugares onde sombra é permitida. */
+    &[open] {
+      animation: dialog-entrada var(--motion-base) var(--ease);
+    }
+
+    &[open]::backdrop {
+      animation: backdrop-entrada var(--motion-base) var(--ease);
+    }
+  }
+
+  .painel {
+    display: flex;
+    flex-direction: column;
+    max-block-size: calc(100dvh - var(--space-5) * 2);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-layer);
+  }
+
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-5) var(--space-5) var(--space-3);
+  }
+
+  .heading {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-inline-size: 0;
+  }
+
+  .title {
+    font-family: var(--font-display);
+    font-size: var(--text-22);
+    font-weight: 600;
+  }
+
+  .description {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    max-inline-size: 46ch;
+  }
+
+  .body {
+    padding: 0 var(--space-5) var(--space-5);
+    overflow-y: auto;
+  }
+
+  .footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-5);
+    border-block-start: 1px solid var(--border);
+  }
+
+  @keyframes dialog-entrada {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  @keyframes backdrop-entrada {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dialog[open],
+    .dialog[open]::backdrop {
+      animation: none;
+    }
+  }
+}

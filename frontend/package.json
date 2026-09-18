@@ -3,13 +3,18 @@
   "version": "0.1.0",
   "description": "Frontend do HomeFinance",
   "scripts": {
-    "dev": "vite",
+    "api:check": "node scripts/api-types.mjs --check",
+    "api:gen": "node scripts/api-types.mjs",
     "build": "tsc --noEmit && vite build",
+    "check": "biome check --write .",
+    "dev": "vite",
+    "e2e": "playwright test",
+    "e2e:report": "playwright show-report",
+    "e2e:ui": "playwright test --ui",
+    "lint": "biome check .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "check": "biome check --write .",
-    "lint": "biome check ."
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
@@ -22,6 +27,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
+    "@playwright/test": "^1.63.0",
     "@tanstack/router-plugin": "^1.168.36",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

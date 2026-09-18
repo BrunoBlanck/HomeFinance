@@ -1,0 +1,125 @@
+@layer components {
+  .corpo {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* A frase-resumo é o dado principal do diálogo: "12 de 18 recebem
+     categoria." Fica em --ink, no tamanho de leitura — não é apoio. */
+  .resumo {
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  /* A tabela ganha a própria moldura em vez de sangrar até a borda do diálogo:
+     ela é uma prévia dentro de um pedido, não a superfície da tela. */
+  .tabela {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .descricao {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink);
+  }
+
+  /* A célula da descrição absorve a largura que sobra da coluna Categoria;
+     sem `max-inline-size: 0` a tabela de layout automático cresce com a
+     descrição e a reticência nunca acontece (mesma regra de /transferencias). */
+  .tabela td:has(> .descricao) {
+    max-inline-size: 0;
+  }
+
+  .semDescricao {
+    color: var(--ink-muted);
+  }
+
+  .celulaDeCategoria {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: start;
+  }
+
+  .categoria {
+    color: var(--ink);
+  }
+
+  /* Linha de proveniência: pontuação é texto em tabular-nums — sem tom, sem
+     barra, sem ícone de "confiança". */
+  .proveniencia {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .motivo {
+    color: var(--ink-muted);
+  }
+
+  .corte {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* <details> do estado vazio: fechado por padrão, é auditoria. */
+  .detalhes {
+    border-block-start: 1px solid var(--border);
+    padding-block-start: var(--space-3);
+  }
+
+  .sumario {
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .detalhes[open] .sumario {
+    margin-block-end: var(--space-3);
+  }
+
+  /* Rodapé: os dois botões num contêiner que QUEBRA linha. "Categorizar 12
+     lançamentos" ao lado de "Cancelar" não cabe em 375px, e o rótulo com o
+     número é normativo — o que cede é a linha, não a palavra. */
+  .rodape {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  @media (max-width: 40rem) {
+    /* No celular a coluna Categoria quebra linha em vez de empurrar a
+       Descrição para dez caracteres; e a descrição ganha duas linhas antes do
+       corte — no toque não existe hover para ler o `title`. */
+    .celulaDeCategoria,
+    .proveniencia,
+    .motivo {
+      white-space: normal;
+    }
+
+    .descricao {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+}

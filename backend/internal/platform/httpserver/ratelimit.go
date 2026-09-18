@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brunorblanck/homefinance/backend/internal/session"
 	"golang.org/x/time/rate"
 )
 
@@ -71,6 +72,31 @@ func NewLimiter(requests int, window, idleTTL time.Duration) *Limiter {
 		burst:   requests,
 		idleTTL: idleTTL,
 	}
+}
+
+// WithBurst reduz (ou eleva) o estouro instantâneo do limitador, sem mexer na
+// cota da janela.
+//
+// O default — estouro igual a `requests` — é o certo para rota barata: quem
+// tem 60/h pode gastar os 60 de uma vez e esperar. Para rota CARA ele é um
+// problema de disponibilidade, não de cota: POST /transfers/detect varre até
+// 30.000 linhas e, com dryRun:false, segura uma conexão do pool numa
+// transação aberta. Com estouro 60, uma única casa dispara 60 execuções
+// simultâneas e esgota o pool (25 conexões) — a API inteira para, dentro da
+// cota (achado A2 da revisão de segurança). Estouro 2–3 mantém o uso legítimo
+// (prévia + confirmação) e transforma a rajada em fila.
+//
+// Chame na MONTAGEM, antes do primeiro Allow: baldes já criados guardam o
+// estouro com que nasceram.
+func (l *Limiter) WithBurst(burst int) *Limiter {
+	if l == nil {
+		return nil
+	}
+	if burst < 1 {
+		burst = 1
+	}
+	l.burst = burst
+	return l
 }
 
 // WithClock injeta o relógio (teste).
@@ -176,4 +202,37 @@ func RateLimit(l *Limiter, key KeyFunc) Middleware {
 // IPKey devolve a KeyFunc que limita por IP do cliente.
 func IPKey(trustedProxyCount int) KeyFunc {
 	return func(r *http.Request) string { return ClientIP(r, trustedProxyCount) }
+}
+
+// HouseholdKeyFunc transforma o id da casa na chave do limitador.
+//
+// Ela existe para que o id em CLARO nunca entre no mapa do limitador — a mesma
+// regra que já vale para o e-mail (§7 da spec 0001): um dump de memória, ou um
+// endpoint de diagnóstico mal feito, não pode virar a lista de casas que
+// importaram arquivo hoje. Em produção quem a implementa é o HMAC do serviço de
+// OTP, com o pepper da aplicação.
+type HouseholdKeyFunc func(householdID string) string
+
+// HouseholdKey devolve a KeyFunc que limita por CASA.
+//
+// A casa sai do contexto publicado pelo RequireAuth, ou seja, do token — nunca
+// do corpo, da query ou do caminho. Requisição sem identidade cai numa chave
+// única e constante: o middleware só é montado depois do RequireAuth, então na
+// prática ela não acontece; se acontecer, o comportamento seguro é limitar
+// TUDO junto, e não deixar passar.
+func HouseholdKey(hash HouseholdKeyFunc) KeyFunc {
+	return func(r *http.Request) string {
+		ident, ok := session.FromContext(r.Context())
+		if !ok || ident.HouseholdID == "" {
+			return "sem-casa"
+		}
+		id := ident.HouseholdID
+		if hash == nil {
+			// Sem função de hash não devolvemos o id em claro: sem ela o
+			// limitador vira global, que é restritivo demais mas nunca
+			// vazante. Em produção ela é sempre ligada.
+			return "sem-hash"
+		}
+		return hash(id)
+	}
 }

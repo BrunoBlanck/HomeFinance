@@ -1,0 +1,77 @@
+@layer components {
+  /* À esquerda, nunca centralizado: todo título desta tela alinha à esquerda, e
+     um indicador centralizado sob um h1 alinhado brigaria com ele. */
+  .passos {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .passo {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* O conector é uma borda, não um pseudo-elemento decorativo com gradiente:
+     ele só precisa dizer "há continuidade daqui para o próximo". */
+  .passo + .passo::before {
+    content: "";
+    inline-size: var(--space-6);
+    block-size: 0;
+    border-block-start: 1px solid var(--border);
+    margin-inline-end: var(--space-2);
+  }
+
+  /* Caixa quadrada de cantos suaves — nunca "pill" arredondada, que é a forma
+     que grita template. */
+  .marca {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-13);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .passo[data-estado="ativo"] {
+    color: var(--ink);
+
+    & .rotulo {
+      font-weight: 600;
+    }
+
+    & .marca {
+      background-color: var(--accent);
+      border-color: var(--accent);
+      color: var(--on-solid);
+    }
+  }
+
+  .passo[data-estado="concluido"] {
+    color: var(--ink-muted);
+
+    & .marca {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  }
+
+  @media (max-width: 40rem) {
+    .passo + .passo::before {
+      inline-size: var(--space-4);
+      margin-inline-end: var(--space-1);
+    }
+  }
+}

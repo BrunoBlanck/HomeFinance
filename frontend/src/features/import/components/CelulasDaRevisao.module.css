@@ -1,0 +1,108 @@
+@layer components {
+  .data {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-muted);
+    white-space: nowrap;
+  }
+
+  .descricao {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink);
+  }
+
+  /* A frase de evidência: o "por quê" daquela linha, com data e valor. É um dos
+     quatro portadores que substituem a cor na marcação de duplicata — por isso
+     ela é TEXTO na linha, e não um ícone ao lado.
+
+     --ink-muted sobre --surface mede 5,1:1 (AA). Em 13px sobre --surface-sunken
+     a conta muda: não repetir esta cor lá sem reverificar. */
+  .evidencia {
+    display: block;
+    max-inline-size: 60ch;
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    line-height: 1.4;
+    color: var(--ink-muted);
+    white-space: normal;
+    /* A pontuação ("88%") mora no meio da frase: tabular para os números
+       alinharem entre linhas, como todo número do app. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Segunda linha da descrição: existe só onde a coluna Categoria foi
+     escondida pelo DataTable (abaixo de 40rem). A sugestão VAI ser gravada —
+     esconder a coluna só é honesto quando o dado reaparece em outro lugar.
+     Mesmo mecanismo da `.secundaria` de /lancamentos. */
+  .secundaria {
+    display: none;
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .ausente {
+    color: var(--ink-muted);
+  }
+
+  /* O segundo seletor (conta de destino) empilha sob o primeiro, dentro da
+     MESMA célula: ele é parte da decisão, não uma coluna nova que ficaria
+     vazia em 5 das 6 linhas. */
+  .decisao {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: start;
+
+    /* A largura do controle sai do que SOBRA na moldura, nunca do texto das
+       opções. Com um teto fixo de 24rem a coluna Decisão levava 416px dos
+       826px úteis de uma janela de 1100px, o cabeçalho "Categoria" saía
+       cortado e o select de categoria só se alcançava rolando a tabela
+       (medido em 17/09/2026).
+
+       A conta do `clamp`, em cima da largura visível (`100cqi`, o container é
+       a moldura do DataTable): as outras quatro colunas pedem cerca de 32rem
+       (Data 5 + Valor 6 + Categoria 6 + Descrição legível 13, mais o recuo das
+       células), e o que resta é do select. Nunca menos que 12rem — abaixo
+       disso o controle deixa de ser clicável com o polegar; nunca mais que
+       24rem, que é onde "Registrar como transferência para Nubank" cabe
+       inteira. Entre os dois, o texto fechado ganha reticências; a lista
+       aberta é do sistema e mostra tudo, e a frase de evidência na própria
+       linha repete a conta sugerida. */
+    & select {
+      max-inline-size: clamp(12rem, calc(100cqi - 32rem), 24rem);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  /* O select e, embaixo, a linha de proveniência da sugestão. */
+  .categoria {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: start;
+  }
+
+  /* "88% · «supermercado»": de onde a sugestão veio. É texto, e só texto —
+     sem tom, sem barra, sem ícone de confiança. Some quando o select deixa de
+     mostrar a sugerida. */
+  .proveniencia {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .semCategoria {
+    color: var(--ink-muted);
+  }
+
+  @media (max-width: 40rem) {
+    .secundaria {
+      display: block;
+    }
+  }
+}
