@@ -1,6 +1,6 @@
 # PLANOS — plano do sistema HomeFinance
 
-**Última revisão:** 09/09/2026 · **Escopo:** o sistema inteiro, com foco no que ainda **não** existe (domínio financeiro).
+**Última revisão:** 17/09/2026 · **Escopo:** o sistema inteiro, com foco no que ainda **não** existe (domínio financeiro).
 
 > Este documento **pensa o sistema**. Ele não é normativo e não vira código direto: o que vale para
 > implementar é a spec da entrega (`docs/specs/`), e o que vale como regra é `AGENTS.md` +
@@ -38,10 +38,27 @@ membros. Não é ferramenta de contador, não é ERP, não é app de investiment
 5. **Ser de duas pessoas.** O que um lança o outro vê, com histórico de quem fez o quê.
 
 ### 1.3 O que o produto explicitamente **não** é (v1)
-Sem multimoeda, sem conversão de câmbio · sem importação de OFX/extrato bancário e sem Open Finance ·
-sem conciliação bancária automática · sem investimentos, patrimônio ou metas de longo prazo ·
-sem app nativo (web responsiva, instalável no futuro) · sem divisão de despesas entre membros
-("quem deve quanto a quem") · sem anexo de comprovante (fica no backlog, ver §14).
+Sem multimoeda, sem conversão de câmbio · ~~sem importação de OFX/extrato bancário e~~ **sem OFX** e
+sem Open Finance · sem **conciliação bancária automática** · ~~sem investimentos, patrimônio ou metas
+de longo prazo~~ **sem patrimônio, posição, rentabilidade ou metas de longo prazo** · sem app nativo
+(web responsiva, instalável no futuro) · sem divisão de despesas entre membros ("quem deve quanto a
+quem") · sem anexo de comprovante (fica no backlog, ver §14).
+
+> **Correção de 16/09/2026 (decisão do usuário) — o histórico fica, o texto muda.** A linha original
+> dizia *"sem importação de OFX/extrato bancário"*, e isso deixou de valer: a **E2 importa extrato e
+> fatura em CSV e em ZIP com senha, de C6 e Nubank** (spec 0004, ADR-024). O que **continua** fora do
+> v1 é o **OFX**, o **Open Finance** e a **conciliação automática** — na E2 o pareamento entre extrato
+> e fatura é *proposto* na tela de revisão e confirmado pelo usuário, nunca decidido pelo sistema.
+
+> **Correção de 17/09/2026 (decisão do usuário) — o histórico fica, o texto muda.** A linha original dizia
+> *"sem investimentos, patrimônio ou metas de longo prazo"*, e a **primeira** palavra deixou de valer: a
+> **E7 entrega o controle de FLUXO de investimento** — aporte e resgate marcados por **natureza de
+> categoria** (`investment`/`redemption`), tela `/investimentos` com o mês, o ano até o mês e os últimos
+> 12 meses, e detecção retroativa por palavra-chave (spec 0006, ADR-029). O que **continua** fora do v1
+> é **patrimônio, saldo investido acumulado, posição, rentabilidade, cotação, ativo, corretora** e
+> **metas de longo prazo**: a tela responde *quanto foi investido*, nunca *quanto eu tenho*, e não existe
+> nenhum número acumulado além dos dois do ano corrente. A entrega não cria tipo de lançamento novo,
+> conta de carteira nem coluna nova — o aporte continua sendo dinheiro que **sai** da conta (ADR-029).
 
 ### 1.4 Como saber que deu certo
 Critérios de produto, não técnicos: lançar despesa em ≤ 3 toques a partir do painel · o mês corrente
@@ -69,14 +86,21 @@ domínio financeiro.
   autenticação inteiro com RHF + Zod · TanStack Router + Query.
 
 ### 2.2 Dívidas conhecidas que o plano precisa endereçar
-| # | Dívida | Impacto se ficar | Onde resolvo |
-|---|---|---|---|
-| DV1 | **ADR-011:** OpenAPI versionado mas handlers/tipos escritos à mão | o custo cresce a cada endpoint; o domínio financeiro adiciona ~35 rotas | decidir **antes da E2** (§5, D1) |
-| DV2 | Convites e gestão de membros ficaram fora da Fase 2 | a promessa "multiusuário por casa" não se cumpre | E7 (§9) |
-| DV3 | Telas sem teste: criar conta, esqueci/redefinir senha, Home, menu do usuário | regressão silenciosa na área mais sensível | E0 |
-| DV4 | Playwright previsto no `AGENTS.md`, nunca instalado | daqui pra frente toda entrega tem fluxo E2E que só o Playwright pega | E0 |
-| DV5 | Suíte multi-banco com testcontainers não existe (só SQLite) | o requisito "qualquer SQL" é hipótese, não fato verificado | E8, com gatilho antecipado (§13, R2) |
-| DV6 | Hook de gofmt/goimports em PostToolUse | ruído de formatação em revisão | E0 (barato) |
+| # | Dívida | Impacto se ficar | Onde resolvo | Status |
+|---|---|---|---|---|
+| DV1 | **ADR-011:** OpenAPI versionado mas handlers/tipos escritos à mão | o custo cresce a cada endpoint; o domínio financeiro adiciona ~35 rotas | decidir **antes da E2** (§5, D1) | ✅ **paga na E0** — gerador ligado do lado TS (ADR-015) |
+| DV2 | Convites e gestão de membros ficaram fora da Fase 2 | a promessa "multiusuário por casa" não se cumpre | E7 (§9) | aberta — E7 subiu para depois da E2 (D12) |
+| DV3 | Telas sem teste: criar conta, esqueci/redefinir senha, Home, menu do usuário | regressão silenciosa na área mais sensível | E0 | ✅ **paga na E0** — 105 testes no frontend |
+| DV4 | Playwright previsto no `AGENTS.md`, nunca instalado | daqui pra frente toda entrega tem fluxo E2E que só o Playwright pega | E0 | ✅ **paga na E0** — 4 E2E contra a API Go real |
+| DV5 | Suíte multi-banco com testcontainers não existe (só SQLite) | o requisito "qualquer SQL" é hipótese, não fato verificado | E8, com gatilho antecipado (§13, R2) | aberta |
+| DV6 | Hook de gofmt/goimports em PostToolUse | ruído de formatação em revisão | E0 (barato) | ✅ **paga na E0** — hook + etapa no check + `.gitattributes` |
+
+**DV7 — achada durante a E0, e é de processo:** o `go test -race` do `check` servia resultado de
+**cache** (`ok (cached)`), então o gate podia aparecer verde numa sessão em que o detector nem
+chegava a subir. Corrigido: `-count=1` obrigatório na etapa de teste, mais uma sonda que distingue
+"o ThreadSanitizer não subiu neste ambiente" de "achei um data race" e imprime **PASSOU COM
+RESSALVA** em vez de **TUDO PASSOU**. A causa local era o sandbox de memória do shell — em terminal
+normal o detector funciona, e foi assim que a E0 foi verificada.
 
 ---
 
@@ -277,7 +301,12 @@ no dado (soft delete + `updated_at`), e log é superfície de vazamento.
 Status: `proposto` = recomendação do plano, aguardando confirmação · `confirmado` = pode virar
 ADR/spec. Nenhuma decisão `proposto` deve ser implementada.
 
-### D1 — oapi-codegen: liga agora ou continua à mão? · **proposto: LIGAR na E0/E1**
+> **Rodada de confirmação de 12/09/2026:** o usuário confirmou D2–D11 como recomendado, escolheu
+> em D1 a variante **só tipos TS**, e em D12 **subiu a E7 para logo depois da E2**. Todas as doze
+> estão fechadas e viraram ADR-015 a ADR-021 em `docs/ARQUITETURA.md`. As perguntas do §15 estão
+> respondidas no próprio §15.
+
+### D1 — oapi-codegen: liga agora ou continua à mão? · ✅ **CONFIRMADO 12/09/2026: só os tipos TS (ADR-015)**
 O ADR-011 adiou o gerador com um teste de aderência (`routes_test.go`) segurando a divergência. Isso
 funcionou para 11 rotas. O domínio financeiro adiciona ~35 rotas e ~25 schemas, e o frontend vai
 duplicar cada um deles em TypeScript à mão.
@@ -287,7 +316,7 @@ TS** para o frontend e manter o Go manual (metade do ganho, um décimo do risco)
 **Se ficar como está:** aceitar conscientemente a duplicação e reforçar `routes_test.go` para cobrir
 também os schemas, não só (método, path).
 
-### D2 — Transferência entre contas · **proposto: par de lançamentos**
+### D2 — Transferência entre contas · ✅ **CONFIRMADO 12/09/2026: par de lançamentos (ADR-016)**
 | Opção | A favor | Contra |
 |---|---|---|
 | **A) Par** (`transfer_out` + `transfer_in`, mesmo `transfer_group_id`) | extrato e saldo por conta são soma direta e indexada; portátil e trivial | integridade do par é responsabilidade do código; editar/excluir precisa tratar os dois |
@@ -297,31 +326,43 @@ também os schemas, não só (método, path).
 elas ficam triviais. O par se protege com UnitOfWork, `transfer_group_id` e a regra "editar/excluir
 age no par". Transferência **nunca** entra em receita/despesa de relatório nem consome orçamento.
 
-### D3 — Saldo da conta · **proposto: derivado**
+### D3 — Saldo da conta · ✅ **CONFIRMADO 12/09/2026: derivado (ADR-017)**
 Derivar de `opening_balance_cents` + soma indexada dos lançamentos. Numa casa (ordem de 10 mil
 lançamentos por ano) a soma é irrelevante em custo, e coluna materializada é a fonte clássica de
 saldo errado — qualquer caminho de escrita esquecido a corrompe. Se um dia doer: snapshot mensal como
 **cache**, com a soma continuando a ser a verdade.
 
-### D4 — Profundidade de categoria · **proposto: exatamente 2 níveis**
+### D4 — Profundidade de categoria · ✅ **CONFIRMADO 12/09/2026: exatamente 2 níveis (ADR-017)**
 Grupo → subcategoria (Moradia → Energia). Profundidade arbitrária exigiria CTE recursiva, cujo
 suporte e sintaxe variam entre os 4 dialetos — é justamente o tipo de coisa que quebra o requisito
 multi-banco. Dois níveis cobrem o caso doméstico com folga e mantêm toda consulta plana.
 
-### D5 — Categorias iniciais da casa · **proposto: semear enxuto**
+### D5 — Categorias iniciais da casa · ✅ **CONFIRMADO 12/09/2026: semear enxuto**
 Casa nova nasce com ~12 grupos pt-BR editáveis (Moradia, Alimentação, Transporte, Saúde, Educação,
 Lazer, Serviços, Pessoal, Impostos, Outras despesas · Salário, Outras receitas), criados na mesma
 transação em que a casa é criada (na verificação do e-mail, onde o `EnsureDefault` já roda). Casa
 vazia obriga o usuário a fazer taxonomia antes de lançar o primeiro gasto — é onde se desiste do app.
 
-### D6 — Cartão de crédito com fatura · **proposto: FORA do v1**
+> **Emenda de 18/09/2026 (decisão do usuário):** a semente deixa de ser só de grupos. Casa nova nasce
+> com **15 grupos, 41 subcategorias e 440 palavras-chave** pré-preenchidas (lista e regras: spec 0003
+> §5 e **ADR-033**), para a categorização automática funcionar já no primeiro extrato importado. O
+> usuário escolheu a versão **enxuta** (~3 folhas por grupo) em vez da completa (66 folhas).
+> "Outras despesas" continua **sem filhas e sem palavras**, como balde residual. **Casas existentes
+> não são tocadas:** a semente roda uma vez, na criação da casa — o ADR-033 traz o erratum ao
+> ADR-029(a), que afirmava (errado) que ela roda no auto-reparo do login.
+
+### D6 — Cartão de crédito com fatura · ⚠️ **REVERTIDO em 16/09/2026 — entrou na E2 (ADR-023)**
+> **Emenda de 16/09/2026:** a confirmação de 12/09 (*fatura fora do v1*) foi **revogada pelo usuário**.
+> A fatura virou entidade na E2 — `card_statements`, `competence_month`, fechamento e vencimento —, e o
+> **ADR-023 supera o ADR-019 (c) e (d)**. O parágrafo abaixo fica como registro do que se pensou em
+> 12/09, não como decisão vigente. O risco **R1** (§13) se materializou por decisão, não por erosão.
 Fatura de verdade traz fechamento, vencimento, competência ≠ caixa, pagamento parcial e estorno —
 sozinha é do tamanho de uma fase. No v1 o cartão é uma conta como as outras (saldo negativo = dívida)
 e `kind` já prevê `credit_card`. Quando entrar, entra por colunas e tabela novas, sem migração
 destrutiva. **Consequência a aceitar:** quem paga tudo no cartão vê o gasto na data da compra, não na
 data da fatura.
 
-### D7 — Ocorrências de conta fixa · **proposto: projeção virtual + tabela de exceções**
+### D7 — Ocorrências de conta fixa · ✅ **CONFIRMADO 12/09/2026: projeção virtual + tabela de exceções (ADR-018)**
 | Opção | A favor | Contra |
 |---|---|---|
 | A) Materializar 12 meses por job | ocorrência é linha real, id estável | precisa job confiável; regra alterada deixa lixo; janela sempre finita |
@@ -333,15 +374,15 @@ idempotente pela chave única, e o passado **pago** é imutável porque virou tr
 ainda não pagos. Mitigação se incomodar: versionar a regra por `starts_on`/`ends_on` (edição encerra
 a versão e cria outra) — decidir só se doer.
 
-### D8 — Orçamento · **proposto: sem acúmulo, com "copiar do mês anterior"**
+### D8 — Orçamento · ✅ **CONFIRMADO 12/09/2026: sem acúmulo, com "copiar do mês anterior" (ADR-020)**
 Sobra não vira crédito no mês seguinte (*rollover*) no v1: dobra a complexidade de cálculo e é
 minoria do uso doméstico. Em troca, uma ação explícita copia todos os limites do mês anterior.
 
-### D9 — Fuso e moeda · **proposto: `timezone` na casa, `BRL` fixo**
+### D9 — Fuso e moeda · ✅ **CONFIRMADO 12/09/2026: `timezone` na casa, `BRL` fixo (ADR-019)**
 A casa define o fuso (default `America/Sao_Paulo`) porque "atrasado" depende dele. Moeda é coluna com
 `BRL` fixo: nenhuma conversão, nenhum símbolo hardcoded na UI.
 
-### D10 — Nomes na interface e nas rotas · **proposto**
+### D10 — Nomes na interface e nas rotas · ✅ **CONFIRMADO 12/09/2026**
 "Contas" é ambíguo em português (conta bancária vs conta a pagar). Fica:
 
 | Conceito | Nome na UI | Rota |
@@ -353,13 +394,13 @@ A casa define o fuso (default `America/Sao_Paulo`) porque "atrasado" depende del
 | Household | **Casa** | `/casa` |
 | Perfil do usuário | **Perfil** | `/perfil` |
 
-### D11 — Gráficos (Fase 5) · **proposto: SVG próprio**
+### D11 — Gráficos (Fase 5) · ✅ **CONFIRMADO 12/09/2026: SVG próprio (ADR-021)**
 `docs/DESIGN.md` proíbe biblioteca de componentes; uma lib de gráficos é uma biblioteca de
 componentes com outro nome, e traz estética alheia. Os gráficos do v1 são poucos e simples (barras
 mensais, rosca por categoria, linha de evolução) — SVG próprio guiado pela skill `dataviz`, com os
 mesmos tokens. Se aparecer necessidade de gráfico interativo complexo, reabrir a decisão com ADR.
 
-### D12 — Onde entram convites (DV2) · **proposto: E7, depois do núcleo**
+### D12 — Onde entram convites (DV2) · ✅ **CONFIRMADO 12/09/2026: E7 sobe para logo depois da E2**
 O núcleo financeiro é o que faz o app valer a pena; convite sem lançamento não serve para nada.
 **Mas:** se você pretende usar com outra pessoa desde o primeiro mês de uso real, convites sobem para
 logo depois da E2. É uma escolha de uso, não técnica.
@@ -415,6 +456,15 @@ dinheiro em centavos, erro único `{error:{code,message,fields}}`, **404 para re
 `summary` no mesmo payload da lista é deliberado: a tela mostra os totais do filtro e não vale uma
 segunda ida ao servidor com risco de divergir do que está na tela.
 
+### 7.2.1 Palavras-chave, categorização automática e transferências internas (E2c — spec 0005, ADR-026)
+| Método | Rota | Notas |
+|---|---|---|
+| POST · PATCH | `/categories`, `/categories/{id}` | ganham `keywords: string[]` (≤ 20, cada 2–40 runas; PATCH com o campo presente **substitui** a lista); `Category` devolve `keywords` sempre · 409 `KEYWORD_TAKEN` com `fields.keyword` e `fields.ownerId` (sempre da mesma casa) |
+| POST · PATCH | `/accounts`, `/accounts/{id}` | idem, conjunto independente do de categoria |
+| POST | `/imports` · GET `/imports/{id}` · POST `/imports/{id}/confirm` | `ImportRow` ganha `suggestedCategoryId`, `matchScore`, `matchedKeyword`, `suggestedCounterpartAccountId`, `matchOccurredOn`; status `transferencia_interna` e `transferencia_ja_registrada`; ação `link`; `categoryId` tri-estado na decisão; resposta ganha `linked` |
+| POST | `/transactions/auto-categorize` | `{ month, dryRun }` → prévia (`dryRun: true`) ou escrita só onde `category_id IS NULL` (`dryRun: false`, recalculada no servidor); rate limit por casa da classe de escrita pesada |
+| GET | `/transfers` | `?month&accountId&counterpartAccountId&limit&cursor` → `{ items (um por par), pairs, balances, nextCursor }`; `accountId` de outra casa → 404 |
+
 ### 7.3 Contas fixas (E3)
 | Método | Rota | Notas |
 |---|---|---|
@@ -430,7 +480,7 @@ segunda ida ao servidor com risco de divergir do que está na tela.
 ### 7.4 Painel (E4)
 | Método | Rota | Notas |
 |---|---|---|
-| GET | `/dashboard?month=YYYY-MM` | um pedido, uma tela: saldo total e por conta · entradas/saídas/resultado do mês · próximos vencimentos e atrasados · top categorias · comparação com o mês anterior |
+| GET | `/dashboard?month=YYYY-MM` | um pedido, uma tela: saldo total e por conta · entradas/saídas/resultado do mês · próximos vencimentos e atrasados · top categorias · comparação com o mês anterior. **A 1ª fatia (spec 0008) entrega só três números: investido no mês (líquido, com sinal), receita (sem resgates) e gasto no cartão de crédito** — os demais blocos entram depois, aditivamente, no mesmo schema |
 
 ### 7.5 Orçamentos e relatórios (E5, E6)
 | Método | Rota | Notas |
@@ -465,6 +515,7 @@ entre telas — trocar de mês no painel e ir para lançamentos mantém o mês.
 ```
 /                  Painel do mês
 /lancamentos       Lista densa + filtros na URL (?mes, ?conta, ?categoria, ?tipo, ?q)
+/transferencias    Transferências entre as contas da casa, por mês e por par (E2c)
 /contas            Contas e saldos
 /contas-fixas      Contas fixas do mês + regras
 /categorias        Árvore de 2 níveis
@@ -492,6 +543,7 @@ entre telas — trocar de mês no painel e ir para lançamentos mantém o mês.
 |---|---|
 | E1 | `AppShell` (nav + header) · `MonthNavigator` · `DataTable` (densa, header fixo, agrupamento) · `Dialog` (`<dialog>` nativo) · `Select` (nativo primeiro) · `EmptyState` · `Toast` (`aria-live`) · `Badge` |
 | E2 | `MoneyInput` (dígitos, centavos-primeiro, pt-BR) · `MoneyText` (tabular, sinal semântico) · `DateField` (`input[type=date]` + rótulo pt-BR) · `SegmentedControl` · `Combobox` (APG, só se o `Select` não bastar) · `FilterBar` |
+| E2c | `KeywordsField` (fichas: Enter/vírgula/colar, Backspace/×, contagem anunciada) · `BlocoTransferencias` na revisão · chips "adicionar *palavra* a esta categoria" · `AutoCategorizeDialog` (prévia com lista e motivos) · `TransferPairPanel` (A→B, B→A, líquido com direção em texto, saldo no fim do mês) |
 | E3 | `StatusPill` (pago/pendente/atrasado) · `ConfirmDialog` |
 | E5 | `ProgressMeter` (orçamento) |
 | E6 | `BarChart` · `DonutChart` · `LineChart` (SVG próprio — D11) |
@@ -506,13 +558,35 @@ foco/teclado resolvidos.
 Toda entrega é **vertical** (banco → API → tela → teste → revisão de segurança) e termina com algo
 que você consegue usar. Nenhuma entrega é "só backend".
 
-### E0 — Fechar a fundação · *sem spec, é dívida conhecida*
+### E0 — Fechar a fundação · *sem spec, é dívida conhecida* · ✅ **CONCLUÍDA em 12/09/2026**
 **Objetivo:** entrar no domínio financeiro sem dívida que multiplique.
 Escopo: decidir D1 (oapi-codegen) e executar · testes das telas faltantes (criar conta, esqueci,
 redefinir, Home, menu) · Playwright instalado com o fluxo de login passando · hook gofmt/goimports.
 **Aceite:** `check.ps1` limpo · Vitest cobrindo as 5 telas · 1 E2E verde · ROADMAP Fase 3 sem `[~]`.
 
-### E1 — Contas e categorias · *spec 0003*
+**Resultado real (saída verificada, não presumida):**
+- `check.ps1` completo: **TUDO PASSOU** — gofmt, build, vet, `go test -race -count=1` nos 13 pacotes,
+  build sem CGo, govulncheck (0 vulnerabilidades) e gosec.
+- Frontend: **105 testes** em 17 arquivos · `tsc --noEmit` limpo · `biome check` limpo ·
+  `npm run build` OK · `npm audit` com 0 vulnerabilidades.
+- E2E: **4 casos verdes** em Chromium contra a API Go real (`npm run e2e`).
+- ROADMAP: Fases 1 e 3 sem nenhum `[~]`.
+- Decisões viradas em ADR: **ADR-015** (tipos TS do OpenAPI) e **ADR-022** (Playwright no lugar do
+  Vitest Browser Mode). D2–D11 fecharam nos ADR-016 a ADR-021.
+- **Revisão de segurança: APROVADO**, com 5 achados próprios levantados e **todos corrigidos antes
+  do fecho** — nenhum crítico ou alto:
+  | # | Sev. | Achado | Correção |
+  |---|---|---|---|
+  | E0-1 | Média | `npm run build` passou a depender de `npx -y` (busca ao registro npm no caminho do build) | `build` voltou a ser offline; a aderência spec↔tipos virou **teste de hash SHA-256** offline (`schema-sync.test.ts`), com o `api:check` de rede reservado ao CI/entrega |
+  | E0-2 | Média | `Bash(npm install *)` liberado sem prompt na allowlist — instala pacote arbitrário e roda `postinstall` de terceiro | removido da allowlist; instalação volta a exigir confirmação |
+  | E0-3 | Média | `execFileSync` com `shell: true` no Windows e caminhos sem aspas | caminhos citados; comentário explicando por que o shell é inevitável (`npx` é `.cmd`, CVE-2024-27980) |
+  | E0-4 | Baixa | Diretório de execução do E2E em caminho previsível de temp compartilhado, contendo o log com códigos OTP e o banco | movido para `frontend/.playwright/execucao/`, dentro do projeto e já ignorado pelo git |
+  | E0-5 | Baixa | `gofmt -l "$file"` sem `--`: caminho iniciado por `-` seria lido como flag | `gofmt -l -- "$file"` e `gofmt -w -- "$file"` |
+  Verificado também: o polyfill de Popover **não** entra no bundle de produção (confirmado no
+  `dist/`), nenhum segredo literal em código ou teste (os do E2E são `crypto.randomBytes` por
+  execução), CORS do E2E com origem exata, e `govulncheck`/`gosec`/`npm audit` limpos.
+
+### E1 — Contas e categorias · *spec 0003* · ✅ **CONCLUÍDA em 13/09/2026**
 **Objetivo:** a casa consegue descrever o próprio dinheiro.
 Escopo: modelos + AutoMigrate v2 (accounts, categories) · semente de categorias (D5) · CRUD dos dois
 com arquivar/desarquivar · saldo derivado (só `opening_balance` nesta entrega, ainda sem lançamento) ·
@@ -520,6 +594,27 @@ casca do app com navegação e seletor de mês · telas `/contas` e `/categorias
 **Aceite:** criar/editar/arquivar conta e categoria pela UI · categoria em uso não se exclui ·
 recurso de outra casa responde 404 em todos os endpoints · repositório testado em SQLite com caso de
 isolamento · revisão de segurança APROVADO.
+
+**Resultado real (saída verificada, não presumida):**
+- `check.ps1` completo: **TUDO PASSOU** — gofmt, build, vet, `go test -race -count=1` nos
+  **19 pacotes**, build sem CGo, govulncheck (0) e gosec.
+- Frontend: **172 testes** em 24 arquivos · `tsc`, `biome`, `build` e `npm audit` limpos ·
+  `api:check` confere spec ↔ tipos TS.
+- E2E: **17 casos verdes** em Chromium contra a API Go real, incluindo o `<dialog>` e o
+  `<select>` nativos, a semente de categorias e o mês na URL.
+- Pacotes novos: `civil` (data civil), `textnorm` (P2 antecipada), `account`, `category`.
+- **AutoMigrate verificado partindo de banco v1 POVOADO**, não só vazio — é o critério de
+  aceite 6, e o caso fácil (banco vazio) não prova nada sobre produção.
+- **Divergência reportada e corrigida:** a spec 0003 tinha omitido a auditoria exigida pelo
+  §4.7. A revisão pegou, a implementação entrou ainda na E1 e a spec ganhou uma emenda
+  datada em vez de ser reescrita como se nunca tivesse errado.
+- **Revisão de segurança: APROVADO**, sem achado crítico ou alto. Verificado: nenhuma
+  consulta sem `household_id`; nenhum `Raw`/`Exec`/interpolação em SQL; todo `ORDER BY` é
+  constante em código; 404 (nunca 403) para recurso de outra casa em todas as rotas com
+  `{id}`, com corpo byte a byte igual ao de id inexistente; DTO explícito por endpoint com
+  `DisallowUnknownFields` (mandar `householdId` é 400); nenhum valor monetário em log nem em
+  auditoria; nenhum `float` em caminho de dinheiro; nenhum `dangerouslySetInnerHTML`; só o
+  mês trafega em query string.
 
 ### E2 — Lançamentos e transferências · *spec 0004* · **a entrega mais importante do projeto**
 **Objetivo:** registrar dinheiro entrando e saindo, e ver o mês.
@@ -531,7 +626,45 @@ listam a primeira página em ≤ 300 ms no SQLite local · transferência não a
 `accountId`/`categoryId` de outra casa → 404 · cursor forjado → 400 · E2E "criar, editar, excluir
 lançamento" verde · revisão APROVADO.
 
-### E3 — Contas fixas · *spec 0005*
+### E2c — Palavras-chave: categorização automática e transferências internas · *spec 0005* · **planejada em 17/09/2026 (ADR-026)**
+**Objetivo:** a pessoa não classifica linha por linha o mesmo "Mercado do seu José" todo mês, e a
+transferência entre as próprias contas deixa de inflar receita e despesa.
+Escopo: `category_keywords` + `account_keywords` (até 20 por item, únicas por casa dentro do tipo,
+`KeywordsField` nos diálogos de categoria e de conta) · pacote folha `internal/textmatch`
+(algoritmo determinístico da §3 da spec: exata → maior substring comum ≥ 5 runas → erro de
+digitação; limiar 80; empate → sem sugestão; **sem IA, sem regex, sem dependência nova**) · cola em
+`internal/classify` · importação ganha `suggestedCategoryId`/`matchScore`/`matchedKeyword` por linha e
+os status `transferencia_interna` (palavra-chave de **outra** conta ativa) e
+`transferencia_ja_registrada` (a outra perna já existe → ação `link`, que só grava a chave de
+importação na perna existente) · confirm com `categoryId` tri-estado e "aceitar todas as
+transferências sugeridas" · chips "adicionar *palavra* a esta categoria" na revisão ·
+`POST /transactions/auto-categorize` com prévia (`dryRun`) e escrita só onde `category_id IS NULL` ·
+`GET /transfers` + tela `/transferencias` (cada par uma vez, totais por sentido, líquido e saldo no fim
+do mês somados no servidor).
+**Fora:** CRUD manual de lançamento e `POST/PATCH/DELETE /transfers` (E2b) · regras por valor, data,
+regex, pesos, sinônimos · recategorizar em massa o que já tem categoria · detecção de transferência
+**sem** palavra-chave (conciliação por valor/data espelhados → backlog com spec própria).
+**Aceite:** tabela da §3 reproduzida por teste, pontuação exata linha a linha · empate → sem sugestão
+e a mesma palavra em duas categorias → 409 · conta batendo vence categoria batendo; a própria conta
+do lote, conta arquivada e categoria arquivada nunca são sugeridas; `income` nunca recebe categoria
+`expense` · importar A e depois B: a linha espelhada em B fica `transferencia_ja_registrada`, o
+`link` grava a chave na perna existente, reimportar B cai em `duplicado_exato` e o saldo das duas
+contas não muda · duas transferências iguais no mesmo dia casam com pernas distintas · `categoryId:
+null` grava sem categoria apesar da sugestão; ausente grava a sugerida; de outra casa → 404 e nada
+gravado · `link` fora de `transferencia_ja_registrada` → 400; a perna vem só da análise · `dryRun` não
+escreve; rodar duas vezes categoriza 0 na segunda; uma auditoria por execução real, sem descrição ·
+`GET /transfers` traz cada par uma vez, `pairs` fecha com `items`, `netCents == aToB − bToA`, saldo
+igual ao de `GET /accounts` no mês corrente · 10.000 linhas × 1.000 palavras-chave em ≤ 2 s ·
+`KeywordsField` por teclado com contagem anunciada · Playwright: cadastrar palavra → importar → linha
+vem sugerida → confirmar → lançamento tem a categoria · revisão de segurança APROVADO.
+
+> **Numeração de spec é atribuída na ESCRITA, não aqui (corrigido em 18/09/2026).** Prever o número
+> na fila produziu três divergências reais: a E2d tomou o **0007** sem que o arquivo existisse, a E6a
+> saiu **sem spec**, e o painel tomou o **0008** que estava reservado para a E5 — que passou a colidir
+> com a E6. A partir daqui, a fila diz *a numerar*; o número nasce com o arquivo em `docs/specs/`.
+> (A E6 mantém o **0009** porque o bloco da E6a já se compromete com esse número em dois pontos.)
+
+### E3 — Contas fixas · *spec a numerar quando for escrita*
 **Objetivo:** nenhuma conta vence sem aviso.
 Escopo: `recurring_bills` + `bill_occurrences` · projeção virtual do mês (D7) · pagar/desfazer/pular
 idempotentes · clamp de dia em mês curto · status derivado no fuso da casa · tela `/contas-fixas`.
@@ -539,27 +672,113 @@ idempotentes · clamp de dia em mês curto · status derivado no fuso da casa ·
 desfazer remove o lançamento e volta o status · testes com o processo em UTC **e** em
 `America/Sao_Paulo` · revisão APROVADO.
 
-### E4 — Painel do mês · *spec 0006 curta (ou anexo da 0005)*
+### E4 — Painel do mês · *spec **0008** (o número 0007 nunca chegou a existir: a E2d virou emenda §12 da spec 0004)*
 **Objetivo:** responder "como estamos?" em uma tela.
+
+> **Fatiada em 18/09/2026, a pedido do usuário.** A **primeira fatia** — a faixa de resumo do mês com
+> três números (**investido no mês**, líquido com sinal; **receita**, sem resgates; **gasto no cartão de
+> crédito**, um número só) — está na `docs/specs/0008-painel-resumo-do-mes.md`. Saldo por conta,
+> vencimentos, top categorias e comparação com o mês anterior seguem nesta E4, depois dela.
 Escopo: `GET /dashboard` agregando em uma consulta por bloco · tela `/` com resultado do mês, saldos,
 vencimentos e top categorias · comparação com o mês anterior.
 **Aceite:** um único pedido de rede monta a tela · números idênticos aos das telas de origem (mesma
 fonte, sem cálculo duplicado no front) · revisão APROVADO.
 
-### E5 — Orçamentos · *spec 0007*
+### E5 — Orçamentos · *spec a numerar quando for escrita*
 Escopo: `budgets` com upsert portátil (P8) · comparação limite × gasto (grupo soma filhos) · copiar
 do mês anterior · tela `/orcamentos`.
 **Aceite:** orçamento de grupo reflete gasto dos filhos · copiar duas vezes não duplica · estouro
 comunicado por texto e número, não só por cor · revisão APROVADO.
 
-### E6 — Relatórios e exportação · *spec 0008*
+### E6a — Gastos por categoria · *sem spec — primeira fatia vertical da E6 (ADR-027)* · ✅ **CONCLUÍDA em 17/09/2026**
+**Objetivo:** responder "para onde o dinheiro foi neste mês?" (§1.2, item 4) sem esperar a E6
+inteira — e sem que o primeiro gráfico do produto nasça torto.
+
+**Fatia, não entrega própria.** A spec 0009 ainda **não existe**: a E6 foi partida e esta fatia saiu
+inteira na vertical (banco → API → tela → teste → revisão), fora da ordem da fila do §9.1. Quando a
+E6 for especificada, a **spec 0009 parte do ADR-027 e trata `GET /reports/by-category` como já
+entregue**; seguem sendo escopo da E6 a **evolução mensal** (`/reports/monthly-evolution`), o
+relatório **por conta** (`/reports/by-account`) e a **exportação CSV** (com o S7 do §11).
+
+**Escopo entregue.** Backend: pacote `backend/internal/report/` — serviço de **leitura pura** (sem
+escrita, sem auditoria, sem UnitOfWork), com `apportion` distribuindo o percentual por **maior resto
+em 128 bits** · `TransactionRepository.SumByCategory` (`GROUP BY category_id`, **uma** consulta) ·
+contrato `GET /api/v1/reports/by-category?month&kind`, sob `requireAuth` e sob o limitador global.
+Frontend: item **Relatórios** na casca, rota `/relatorios/categorias`, componente próprio
+`DonutChart` — **o primeiro gráfico do produto**, SVG escrito para este projeto (D11 / ADR-021) —,
+**tabela como fonte da verdade** (o SVG é `aria-hidden`) e tokens `--chart-1..4` / `--chart-pending`.
+
+**Resultado real (saída verificada, não presumida):**
+- `internal/report`: `go test -race -count=1 ./internal/report/...` → **ok 13.325s** (última
+  execução, pelo revisor) · `gosec ./internal/report/...` → **Files: 4 · Lines: 771 · Nosec: 0 ·
+  Issues: 0** · `go vet` e `gofmt` limpos.
+- `gormstore`, testes do relatório: `TestRelatorioPorCategoriaBateComSummary`,
+  `TestRelatorioNaoVazaEntreCasasComNomesIguais`,
+  `TestRelatorioComCategoriaAdulteradaNaoVazaNomeNemId` e
+  `TestRelatorioComPaiDeOutraCasaPromoveAFilha` → **PASS**.
+- Volume medido: **10 000 lançamentos vivos + 200 categorias → 193 linhas, 1 consulta, 20,8 ms**.
+  Sem N+1 — e a contagem de consultas é **assertada** por callback do GORM, não observada de olho.
+- Frontend: `biome`, `tsc --noEmit`, `npm run build` e `npm audit` limpos · **Vitest: 645 testes
+  passando**, com uma única falha — `src/api/schema-sync.test.ts` —, **alheia a esta entrega** (ver
+  o último parágrafo).
+- E2E Playwright: `relatorio-por-categoria.spec.ts` + `importacao.spec.ts` → **13 passed (1.2m)**;
+  telas migradas para o hook de foco → **20 passed (1.2m)**.
+- **Revisão de segurança: APROVADO** (`revisor-seguranca`), com três achados de severidade **baixa**
+  — **B1** amplificação de log (um registro por linha anômala), **B2** incoerência de política de
+  falha, **B3** `somaSegura` aceitando parcela negativa —, **os três corrigidos**; o **delta das
+  correções foi revisado e APROVADO de novo**.
+
+**Decisões que valem registro** (ADR-027 (a)–(f) em `docs/ARQUITETURA.md`; as de apresentação
+ficaram na tela):
+- **percentual em pontos-base inteiros, apurados no servidor** — `float` não aparece em nenhum ponto
+  do caminho e o cliente só formata (§4.1);
+- balde **"Sem categoria" explícito** (`categoryId: null`, nunca omitido): dinheiro sem etiqueta
+  aparece, não some;
+- **grupo soma as filhas** e carrega o que foi lançado direto nele (`direct*`) — é o que faz o total
+  fechar;
+- **teto de fatias do gráfico: 4 nomeadas + pendente + "Outras"**, medido pelo validador da skill
+  `dataviz` — cinco passos monocromáticos já reprovam o piso de contraste;
+- percentual com **2 casas na tabela** (a soma fecha **100,00%** exato) e **1 na legenda**.
+
+**Correções colaterais feitas no caminho:**
+- barra de navegação inferior do celular **reespecificada para 6 itens** (hífen suave, `--text-12` e
+  o token `--nav-bar-h` reservando a altura) — emenda em `docs/DESIGN.md`;
+- hook compartilhado **`useFocoNoTitulo`** no lugar de seis `useEffect` quase iguais — corrigiu um
+  **bug real**: o `<h1>` não recebia foco ao chegar pelo menu;
+- `vite.config.ts` com `testTimeout`/`hookTimeout` de 15 s — contenção de CPU na máquina, não
+  defeito de teste.
+
+**Pendências honestas — registradas como NÃO resolvidas:**
+- `TransfersScreen.tsx` e `HomeScreen.tsx` ainda têm o `useEffect` de foco **inline**: a primeira é
+  território da E2c em andamento, a segunda ficou fora do escopo;
+- a suíte do relatório **nunca rodou contra PostgreSQL** (`eachBackend` só roda SQLite sem
+  `TEST_POSTGRES_DSN`) — vale uma rodada antes da entrega final (é o gatilho de R2, §13);
+- `prefers-contrast: more` e `forced-colors` da rampa `--chart-*`: validados **no papel**, sem teste
+  automatizado;
+- **modo escuro** e **375 px** da tela nova sem asserção automatizada;
+- o E2E cobre importar → categorizar → relatório muda; falta o caminho de **exclusão** de lançamento;
+- `archivedAt` de categoria filha **não exercitado no navegador**;
+- rolagem horizontal a **200% de zoom** e recorte da coluna **Valor** no celular: **pré-existentes**
+  do cabeçalho e do `DataTable`, medidos e deixados fora do escopo desta entrega;
+- divergência **cosmética** de contrato: o `pattern` de `YearMonth` aceita `0000-01`, que o servidor
+  recusa com 400 — o servidor está **mais estrito** que a spec.
+
+**Não são desta entrega, e travam o `check.ps1` e o `api:check` — pertencem à E2c:**
+`internal/importer` falha em `qa_e2c_desempenho_test.go` (teste de desempenho da E2c: 422 isolado,
+500 sob carga), e `backend/api/openapi.yaml` está **dessincronizado** de
+`frontend/src/api/schema.gen.ts` porque a sessão da E2c editou a spec sem rodar `npm run api:gen`.
+
+### E6 — Relatórios e exportação · *spec 0009*
 Escopo: três relatórios agregando por `year_month` (P1) · gráficos SVG próprios (D11) · CSV em
 streaming sanitizado (§11) · tela `/relatorios`.
 **Aceite:** intervalo > 24 meses recusado · CSV abre correto no Excel pt-BR · célula iniciada por
 `=`/`+`/`-`/`@` neutralizada · export registrado em auditoria e com rate limit próprio · revisão
 APROVADO.
 
-### E7 — Convites e membros · *spec 0009* · fecha a Fase 2 (DV2)
+> **Emenda de 17/09/2026:** o relatório **por categoria** já saiu na **E6a** (ADR-027). A spec 0009
+> nasce partindo dele como entregue e cobre evolução mensal, por conta e exportação CSV.
+
+### E7 — Convites e membros · *spec a numerar quando for escrita* · fecha a Fase 2 (DV2)
 Escopo: `invitations` com código de 6 dígitos (mesma disciplina do ADR-009: só hash HMAC, uso único,
 expiração, limite de tentativas, rate limit) · aceitar convite · listar/remover membro, trocar papel ·
 tela `/casa`.
@@ -574,10 +793,14 @@ deploy · `.env.example` final.
 **Aceite:** a mesma suíte de repositório passa em Postgres, MySQL, SQLite e MSSQL · auditoria sem
 achado crítico ou alto em aberto · restauração de backup testada de verdade, não descrita.
 
-### 9.1 Dependências
+### 9.1 Dependências — ordem confirmada em 12/09/2026
+
+D12 foi decidido a favor de **usar com duas pessoas desde o começo**, então a E7 sobe para logo
+depois da E2 (ela é independente do resto do núcleo, então não atrasa E3–E6, só troca de posição
+na fila):
+
 ```
-E0 ──▶ E1 ──▶ E2 ──▶ E3 ──▶ E4 ──▶ E5 ──▶ E6 ──▶ E8
-                └──────────────────────────────▶ E7   (independente após E2 — ver D12)
+E0 ──▶ E1 ──▶ E2 ──▶ E2c ──▶ E7 ──▶ E3 ──▶ E4 ──▶ E5 ──▶ E6 ──▶ E8
 ```
 
 ---
@@ -637,7 +860,7 @@ domínio financeiro traz e que o `revisor-seguranca` vai cobrar em toda entrega 
 
 | # | Risco | Probabilidade | Mitigação |
 |---|---|---|---|
-| R1 | **Cartão de crédito volta pela janela** e puxa competência, fatura e estorno para dentro do v1 | alta | D6 é decisão registrada; pedido novo vira ADR e entrega própria, não emenda de escopo |
+| R1 | **Cartão de crédito volta pela janela** e puxa competência, fatura e estorno para dentro do v1 | alta | **Materializou-se em 16/09/2026**, e pelo caminho previsto: virou **ADR-023** e escopo explícito da spec 0004, não emenda silenciosa. Fatura e competência entraram; **estorno continua fora** (crédito de fatura vira receita — §3.4 D4 da spec 0004) |
 | R2 | O requisito multi-banco só é verificado na E8 e algo estrutural não passa em MSSQL/MySQL | média | §6 decide as armadilhas antes; **gatilho antecipado:** rodar a suíte em Postgres + MySQL uma vez na E2, quando o schema financeiro nasce |
 | R3 | Mudança destrutiva de schema (renomear coluna) — AutoMigrate não faz | média | nome e tipo pensados agora (§3); renomear exige ADR + passo manual; preferir **coluna nova** a renomeação |
 | R4 | Design system vira gargalo (E1 precisa de 8 componentes) | média | componente só nasce com tela que o use; nativo primeiro (`<dialog>`, `<select>`, `input[type=date]`) antes de reimplementar padrão APG |
@@ -654,7 +877,9 @@ domínio financeiro traz e que o `revisor-seguranca` vai cobrar em toda entrega 
 | **Fatura de cartão de crédito** | `accounts.closing_day/due_day` + tabela `card_statements`; `transactions.competence_month`; pagar fatura = transferência |
 | **Parcelamento** | `installment_group_id` + `installment_no/total`; N lançamentos futuros; sobra da divisão vai na primeira parcela |
 | **Anexo de comprovante** | armazenamento fora do banco, URL assinada de vida curta, tipo e tamanho validados, varredura — é superfície de ataque nova, entra com spec própria |
-| **Importar OFX/CSV de banco** | conciliação com regra de correspondência e revisão humana obrigatória |
+| ~~**Importar OFX/CSV de banco**~~ → **parcialmente entregue na E2 (16/09/2026)** | CSV e ZIP com senha de C6 e Nubank entraram na spec 0004, com revisão humana obrigatória antes de gravar. **Segue no backlog:** OFX, Open Finance e conciliação automática |
+| **Conciliação de transferência sem palavra-chave** | pareamento só por valor e data espelhados entre duas contas — é conciliação, exige spec própria; a E2c só detecta por palavra-chave de conta (ADR-026e) |
+| **Regras de categorização além de palavra-chave** | por valor, data, conta de origem ou regex; sinônimos; aprendizado sem clique — cada um reabre o ADR-026 |
 | **Metas e reserva de emergência** | depende de relatório histórico consolidado |
 | **Divisão entre membros** | "quem pagou / quem deve" — muda o modelo de lançamento, exige ADR |
 | **Multi-casa por usuário** | `switch-household` e `hid` no token já preveem; falta UI e revisão de sessão |
@@ -665,19 +890,31 @@ domínio financeiro traz e que o `revisor-seguranca` vai cobrar em toda entrega 
 
 ---
 
-## 15. Perguntas abertas para você
+## 15. Perguntas abertas — ✅ **todas respondidas em 12/09/2026**
 
-Nenhuma bloqueia começar a E0, mas as três primeiras mudam a E1/E2 e valem responder antes.
+As seis perguntas abaixo foram feitas ao usuário e respondidas na abertura da execução do plano.
+A resposta de cada uma está registrada logo abaixo da pergunta; as decisões correspondentes viraram
+ADR-015 a ADR-021.
 
 1. **D1 — oapi-codegen:** ligo o gerador agora (recomendado), gero **só os tipos TS** do frontend, ou
    mantenho tudo à mão e reforço o teste de aderência?
+   → **Resposta: só os tipos TS.** O frontend deriva `schema.gen.ts` da spec e o Go segue manual.
+   Fechado no **ADR-015**; executado na E0.
 2. **D6 — cartão de crédito:** confirma que fatura fica fora do v1 (cartão como conta comum)? Se você
    paga a maior parte das despesas no cartão, isso muda o quanto o app serve já no primeiro mês.
+   → **Resposta: confirmado, fatura fica fora do v1.** Cartão é conta comum, `kind = credit_card` é
+   rótulo. Fechado no **ADR-019(c)**, com a consequência aceita registrada lá.
 3. **D12 — convites:** o app vai ser usado por duas pessoas desde o começo? Se sim, subo a E7 para
    logo depois da E2.
+   → **Resposta: sim.** A E7 subiu para logo depois da E2 (ver §9.1).
 4. **D2 e D7** (transferência como par, ocorrência virtual): confirma as recomendações ou quer ver o
    desenho alternativo detalhado?
+   → **Resposta: confirmadas as duas.** Fechadas nos **ADR-016** e **ADR-018**, com as alternativas
+   recusadas e o porquê registrados em cada um.
 5. **Ordem:** a sequência E1 → E2 → E3 → E4 faz sentido para o seu uso, ou você prefere ver o painel
    antes das contas fixas?
+   → **Resposta: sequência mantida**, com a E7 inserida depois da E2 por conta de D12 (ver §9.1).
 6. **E0:** pago a dívida da fundação primeiro (recomendado — entrega curta) ou vou direto para a E1 e
    resolvo as pendências no caminho?
+   → **Resposta: E0 primeiro.** A dívida da fundação (DV1, DV3, DV4, DV6) é paga antes de entrar no
+   domínio financeiro.

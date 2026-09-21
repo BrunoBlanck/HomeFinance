@@ -1,0 +1,83 @@
+@layer components {
+  .regiao {
+    position: fixed;
+    /* Soma a barra inferior: no celular o toast é z-index 50 contra os 20 da
+       barra, e sem esta reserva ele cobria a navegação. No desktop o token é
+       `0px` e a posição continua exatamente a mesma. */
+    inset-block-end: calc(var(--space-4) + var(--nav-bar-h));
+    inset-inline: var(--space-4);
+    display: flex;
+    justify-content: center;
+    /* Não intercepta clique: o aviso é informativo e não pode cobrir o botão
+       que a pessoa ia apertar em seguida. */
+    pointer-events: none;
+    z-index: 50;
+  }
+
+  .live {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    inline-size: min(28rem, 100%);
+  }
+
+  .toast {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    /* Camada flutuante — o outro lugar onde sombra é permitida. */
+    box-shadow: var(--shadow-layer);
+    animation: toast-entrada var(--motion-base) var(--ease);
+
+    /* Sucesso do SISTEMA usa --accent, nunca --income: verde de receita é
+       reservado a dinheiro (docs/DESIGN.md, princípio 5). */
+    &[data-tone="success"] {
+      border-inline-start: 3px solid var(--accent);
+    }
+
+    &[data-tone="error"] {
+      border-inline-start: 3px solid var(--danger);
+    }
+  }
+
+  .icone {
+    flex: none;
+    display: flex;
+    margin-block-start: 1px;
+  }
+
+  /* Forma plana, e não o aninhamento invertido (`.toast & { }` dentro de
+     `.icone`): o parser de CSS do jsdom não entende essa forma e descarta a
+     FOLHA INTEIRA, deixando os testes de componente rodarem sem estilo — o que
+     dá falso verde em qualquer asserção de visibilidade. O navegador aceita as
+     duas; só uma sobrevive ao teste. */
+  .toast[data-tone="success"] .icone {
+    color: var(--accent);
+  }
+
+  .toast[data-tone="error"] .icone {
+    color: var(--danger);
+  }
+
+  .texto {
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  @keyframes toast-entrada {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast {
+      animation: none;
+    }
+  }
+}

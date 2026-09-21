@@ -1,0 +1,11 @@
+Data de Compra;Nome no Cartão;Final do Cartão;Categoria;Descrição;Parcela;Valor (em US$);Cotação (em R$);Valor (em R$)
+13/07/2026;FULANO EXEMPLO;1111;Casa / Escritório Mobiliário;LOJA EXEMPLO MOVEIS-;2/7;0;0;284.01
+08/08/2026;FULANO EXEMPLO;1111;-;"Inclusao de Pagamento    ";Única;0;0;-500.00
+15/08/2026;FULANO EXEMPLO;1111;Vestuário / Roupas;LOJA ROUPA EXEMPLO;Única;0;0;139.99
+24/08/2026;FULANO EXEMPLO;1111;Transporte;DL*APPCORRIDA;Única;0;0;9.57
+02/09/2026;FULANO EXEMPLO;1111;-;Estorno Tarifa;Única;0;0;-50.00
+02/09/2026;FULANO EXEMPLO;1111;-;Anuidade Diferenciada;1/12;0;0;50.00
+11/08/2026;FULANO EXEMPLO;2222;Supermercados / Mercearia;MERCADO EXEMPLO 475;Única;0;0;8.48
+18/08/2026;FULANO EXEMPLO;2222;Restaurante / Lanchonete / Bar;BISTRO EXEMPLO;Única;0;0;38.39
+20/08/2026;FULANO EXEMPLO;2222;Supermercados / Mercearia;PADARIA EXEMPLO;Única;0;0;6.69
+20/08/2026;FULANO EXEMPLO;2222;Supermercados / Mercearia;PADARIA EXEMPLO;Única;0;0;6.69

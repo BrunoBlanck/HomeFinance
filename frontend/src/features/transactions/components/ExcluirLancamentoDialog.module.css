@@ -1,0 +1,11 @@
+@layer components {
+  /* O parágrafo que explica a consequência. Largura de leitura curta de
+     propósito: é o texto que a pessoa precisa TERMINAR antes de clicar em
+     excluir, e linha longa é linha pulada. */
+  .corpo {
+    max-inline-size: 48ch;
+    font-size: var(--text-15);
+    line-height: 1.55;
+    color: var(--ink);
+  }
+}

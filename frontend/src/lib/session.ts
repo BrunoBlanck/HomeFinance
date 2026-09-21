@@ -1,25 +1,12 @@
 import { queryOptions } from '@tanstack/react-query'
 import { apiRequest } from '@/api/client'
+import type { Session, SessionHousehold, SessionUser } from '@/api/types'
 
-export type SessionHousehold = {
-  id: string
-  name: string
-  role: string
-}
-
-export type SessionUser = {
-  id: string
-  name: string
-  email: string
-  emailVerifiedAt: string | null
-  createdAt: string
-}
-
-export type Session = {
-  user: SessionUser
-  household: SessionHousehold
-  households: SessionHousehold[]
-}
+/** Os tipos da sessão vêm do contrato OpenAPI (ADR-015) e são reexportados aqui
+ *  porque este é o módulo que o resto do app conhece. Ganho concreto da
+ *  derivação: `role` deixou de ser `string` e passou a ser `'owner' | 'member'`,
+ *  que é o que a spec sempre disse. */
+export type { Session, SessionHousehold, SessionUser }
 
 export const sessionQueryKey = ['session'] as const
 

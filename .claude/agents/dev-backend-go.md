@@ -33,4 +33,5 @@ Antes de implementar, leia sempre: `CLAUDE.md`, `docs/ARQUITETURA.md`, `docs/SEG
 
 - Todo código novo nasce com teste (`testing` + testify; handlers com `httptest`). Rode `go build ./...`, `go vet ./...` e `go test -race ./...` antes de concluir — e reporte o resultado real.
 - Comentários em português, código em inglês.
+- **Número de ADR e de spec se escolhe na hora da escrita** (lição de 18/09/2026): se o plano que você recebeu já traz um número ("ADR-032"), NÃO confie nele — releia `docs/ARQUITETURA.md` (e `docs/specs/`) no momento de escrever e tome o primeiro número livre. Outras sessões escrevem nos mesmos arquivos em paralelo. Em doc compartilhado, acrescente em bloco novo no fim e confira o `git diff`: nada fora do seu bloco pode ter mudado.
 - Ao terminar, liste os pontos sensíveis do que fez para orientar o `revisor-seguranca` — a sua entrega só é aceita depois da revisão de segurança.

@@ -1,0 +1,31 @@
+@layer components {
+  /* Uma linha de fichas, abaixo da descrição e da evidência. As fichas são o
+     Button quiet sm do sistema — nenhum chip arredondado, nenhum fundo
+     colorido, nenhum estilo inventado. O que este arquivo desenha é só o
+     arranjo e o estado "já aprendida". */
+  .fichas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin-block-start: var(--space-1);
+    white-space: normal;
+  }
+
+  .rotulo {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* A ficha que virou fato: texto estático com o ícone de feito, na mesma
+     altura do botão que ela substituiu, para a linha não pular. */
+  .aprendida {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-block-size: var(--control-h-sm);
+    padding-inline: var(--space-2);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+}

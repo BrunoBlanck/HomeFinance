@@ -1,0 +1,245 @@
+@layer components {
+  .pagina {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    max-inline-size: 62rem;
+  }
+
+  .cabecalho {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-28);
+    font-weight: 600;
+    color: var(--ink);
+
+    /* O foco entra aqui na troca de rota; o anel só aparece para quem navega
+       por teclado, nunca no clique. */
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .apoio {
+    margin-block-start: var(--space-1);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  .acoesDoTopo {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* Os dois botões da faixa de pendência: o primário resolve a dívida, o
+     secundário só a mostra. */
+  .acoesDaFaixa {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* Faixa de filtro e resumo: recuada, para ler como barra de ferramentas da
+     tabela e não como mais uma linha de dado. */
+  .faixa {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    background-color: var(--surface-sunken);
+    border-block-end: 1px solid var(--border);
+  }
+
+  /* Os dois filtros da faixa, lado a lado. Cada campo mantém a largura do
+     próprio conteúdo e EMBRULHA quando não cabe — a 375 px eles empilham, cada
+     um com a sua largura, sem esticar. `flex-end` alinha os controles pela
+     base, porque os rótulos visíveis têm alturas iguais mas o alinhamento por
+     baseline quebraria se um deles ganhasse mensagem de erro. */
+  .filtros {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-4);
+  }
+
+  /* O filtro de categoria não é um seletor: ele chega pelo atalho do
+     relatório. Aqui ele só se DECLARA — rótulo, nome e a saída —, alinhado
+     pela base com os dois seletores vizinhos. Sem cor: ele é estado de
+     filtro, não estado financeiro. */
+  .filtroDeCategoria {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background-color: var(--surface);
+    /* Acompanha a altura do campo dos seletores ao lado. */
+    min-block-size: 2.25rem;
+  }
+
+  .rotuloDoFiltro {
+    font-size: var(--text-12);
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .nomeDoFiltro {
+    font-size: var(--text-13);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  /* Entrou e Saiu são NEUTROS e sem sinal: a palavra já diz a direção, e pintar
+     os dois gastaria --income/--expense em informação que o texto já carrega.
+     Resultado é o único número ambíguo da barra — ele leva tom e sinal. */
+  .resumo {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* As duas linhas da faixa, empilhadas: os números do mês e, abaixo dela e
+     subordinada, a explicação do que ficou de fora. */
+  .faixaDeNumeros {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Segunda linha: mesma família da primeira, com o MOTIVO à frente dos
+     números. Não é um quarto item depois de `Resultado` — ali ela disputaria o
+     fim da frase com o único número da faixa que leva tom e sinal. */
+  .resumoFora {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-block-start: var(--space-1);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .resumoItem {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+  }
+
+  .separador {
+    color: var(--border-strong);
+  }
+
+  .conta {
+    color: var(--ink-muted);
+  }
+
+  .descricao {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink);
+  }
+
+  .semDescricao {
+    color: var(--ink-muted);
+  }
+
+  /* Segunda linha da descrição: existe só onde as colunas Conta e Categoria
+     foram escondidas pelo DataTable (abaixo de 40rem). Sem ela, o dado sumiria
+     de verdade na tela estreita — esconder coluna só é honesto quando o
+     conteúdo reaparece em outro lugar. */
+  .secundaria {
+    display: none;
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Rodapé de paginação. Mora no Panel, fora da <table>: ele fala da CONSULTA
+     ("50 de 214"), não dos dados, e uma <tfoot> é o lugar do total. */
+  .rodape {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    border-block-start: 1px solid var(--border);
+  }
+
+  .contagem {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .procurando {
+    padding: var(--space-5) var(--space-4);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+    text-align: center;
+  }
+
+  @media (max-width: 40rem) {
+    /* No toque não existe hover para ler o `title`, e a coluna elástica no
+       celular fica com o que sobra de 375px: a descrição ganha duas linhas
+       antes do corte, como em /transferencias. */
+    .descricao {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    /* Flex, e não block, porque abaixo de 40rem ela abriga o botão
+       `Sem categoria` ao lado do nome da conta. */
+    .secundaria {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-1);
+    }
+
+    .faixa {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .filtros {
+      gap: var(--space-2);
+    }
+
+    /* Cada item ocupa a linha inteira e o `·` some — a regra do separador
+       órfão, que já vale para o resto do app: `·` abrindo uma linha é descuido,
+       não pontuação. */
+    .resumoFora .resumoItem {
+      flex-basis: 100%;
+    }
+
+    .resumoFora .separador {
+      display: none;
+    }
+  }
+}

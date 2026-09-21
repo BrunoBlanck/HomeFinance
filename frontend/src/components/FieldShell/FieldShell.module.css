@@ -84,4 +84,42 @@
     box-shadow: inset 0 0 0 100px var(--surface-sunken);
     -webkit-text-fill-color: var(--ink);
   }
+
+  /* Densidade compacta: campo que mora dentro de outra coisa — célula de tabela
+     ou barra de filtro. Fica no fim do arquivo porque vence as regras de
+     `.control` acima, e neste projeto a especificidade cresce na ordem do
+     arquivo.
+
+     O que muda: a mensagem deixa de reservar altura e só ocupa espaço quando
+     tem algo a dizer — na prática, o erro. Vazia, ela sai do fluxo; o `gap` do
+     flex ignora filho com `display: none`, então não sobra folga nenhuma.
+
+     O que NÃO muda: o `<label>` continua no DOM, a mensagem continua no
+     `aria-describedby` e o foco continua visível. Compacto é sobre pixel, não
+     sobre abrir mão de acessibilidade. */
+  .field[data-density="compact"] {
+    /* Sem o `start`, o `stretch` padrão do flex faria o controle ocupar a linha
+       inteira de novo e a promessa de "largura por conteúdo" morreria aqui. */
+    align-items: start;
+
+    & .message {
+      min-block-size: 0;
+    }
+
+    & .message:empty {
+      display: none;
+    }
+
+    /* Largura por conteúdo: numa faixa de filtro ou numa célula, um campo de
+       100% empurraria todo o resto da linha para fora.
+
+       O `padding-inline` fica de fora de propósito: mexer nele aqui venceria,
+       por especificidade, tanto o recuo que o PasswordField reserva para o
+       botão "ver" quanto o que o Select reserva para a seta — e o texto passaria
+       por baixo dos dois. */
+    & .control {
+      inline-size: auto;
+      min-block-size: var(--control-h-sm);
+    }
+  }
 }

@@ -1,0 +1,119 @@
+@layer components {
+  /* A zona tracejada é o alvo do ARRASTE, e a borda tracejada é o que diz isso
+     sem uma linha de texto extra. Ela não é clicável: quem abre o seletor é o
+     input de verdade que mora dentro dela. */
+  .zona {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background-color: var(--surface-sunken);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      background-color var(--motion-fast) var(--ease);
+  }
+
+  .linha {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-inline-size: 0;
+  }
+
+  /* O input NATIVO, visível e focável.
+     `font-size: 0` apaga só o texto que o navegador escreve ao lado do botão
+     ("Nenhum arquivo selecionado" / o nome do arquivo). Ele é intocável por
+     CSS — não trunca, não quebra e estoura o painel com um nome longo —, então
+     o nome sai na nossa linha, com reticências e `title`. O botão recupera o
+     tamanho logo abaixo; o input continua real, focável e rotulado. */
+  .input {
+    flex: none;
+    inline-size: auto;
+    max-inline-size: max-content;
+    font-size: 0;
+    color: transparent;
+    border-radius: var(--radius-sm);
+  }
+
+  .input:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+  }
+
+  /* Botão secundário do projeto, aplicado ao botão que o NAVEGADOR desenha.
+     É o que dá a cara do sistema ao input sem substituí-lo por um <div>. */
+  .input::file-selector-button {
+    margin-inline-end: var(--space-3);
+    block-size: var(--control-h-sm);
+    padding-inline: var(--space-3);
+    background-color: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease);
+  }
+
+  .input::file-selector-button:hover {
+    background-color: color-mix(in oklch, var(--accent), transparent 88%);
+  }
+
+  .vazio,
+  .tamanho,
+  .arraste {
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .arraste {
+    margin-block-start: calc(var(--space-1) * -1);
+  }
+
+  /* O nome é a única parte que pode ser longa — ele encolhe, e os vizinhos
+     (tamanho e "Remover") ficam inteiros. `min-inline-size: 0` é o que permite
+     a um filho de flex encolher abaixo do conteúdo. */
+  .nome {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .tamanho {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Com arquivo escolhido a zona deixa de ser convite e passa a ser estado:
+     borda inteira e superfície normal, como qualquer linha de dado. */
+  .zona[data-preenchido="true"] {
+    background-color: var(--surface);
+    border-style: solid;
+    border-color: var(--border-strong);
+  }
+
+  /* Arraste em curso. `--accent` a 92% de transparência é a derivação canônica
+     de fundo tingido do docs/DESIGN.md — nenhuma cor nova. */
+  .zona[data-dragover="true"] {
+    border-color: var(--accent);
+    background-color: color-mix(in oklch, var(--accent), transparent 92%);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .zona,
+    .input::file-selector-button {
+      transition: none;
+    }
+  }
+}

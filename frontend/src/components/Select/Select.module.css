@@ -1,0 +1,48 @@
+@layer components {
+  .wrap {
+    position: relative;
+    display: block;
+
+    /* A seta do agente é apagada e redesenhada com o ícone do conjunto do
+       projeto — um conjunto só, traço 1.5, currentColor (docs/DESIGN.md). */
+    & select {
+      appearance: none;
+      padding-inline-end: var(--space-7);
+      cursor: pointer;
+    }
+
+    /* As opções são desenhadas pelo SISTEMA, não por nós: sem as duas linhas
+       abaixo, no tema escuro elas saem em branco sobre branco no Windows. */
+    & option,
+    & optgroup {
+      background-color: var(--surface);
+      color: var(--ink);
+    }
+  }
+
+  .chevron {
+    position: absolute;
+    inset-inline-end: var(--space-3);
+    inset-block-start: 50%;
+    translate: 0 -50%;
+    display: flex;
+    color: var(--ink-muted);
+    pointer-events: none;
+  }
+
+  /* Compacto: a seta encosta na borda e o `<select>` só reserva o espaço dela.
+     Sem isso, o campo de largura-por-conteúdo carregaria 48px de folga à
+     direita — justamente a economia que a densidade existe para fazer.
+
+     No fim do arquivo porque vence `.wrap select` e `.chevron` acima: neste
+     projeto a especificidade cresce na ordem do arquivo. */
+  .wrap[data-density="compact"] {
+    & select {
+      padding-inline-end: var(--space-6);
+    }
+
+    & .chevron {
+      inset-inline-end: var(--space-2);
+    }
+  }
+}

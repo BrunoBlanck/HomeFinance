@@ -1,0 +1,168 @@
+@layer components {
+  .wrap {
+    position: relative;
+    display: flex;
+  }
+
+  .trigger {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-block-size: 2.75rem;
+    padding-inline: var(--space-1);
+    border-radius: var(--radius-sm);
+    color: var(--ink-muted);
+  }
+
+  .avatar {
+    display: grid;
+    place-items: center;
+    inline-size: 32px;
+    block-size: 32px;
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-sunken);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-size: var(--text-13);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* Camada realmente flutuante: aqui a sombra é legítima. */
+  .panel {
+    position: fixed;
+    inset: auto var(--space-4) auto auto;
+    inset-block-start: calc(56px + var(--space-2));
+    inline-size: 240px;
+    max-inline-size: calc(100vw - var(--space-6));
+    padding: var(--space-2);
+    margin: 0;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-layer);
+    color: var(--ink);
+  }
+
+  .panel:not(:popover-open) {
+    display: none;
+  }
+
+  .identity {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  .name {
+    font-size: var(--text-15);
+    font-weight: 600;
+  }
+
+  .email {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .divider {
+    block-size: 1px;
+    border: none;
+    margin: var(--space-1) 0;
+    background-color: var(--border);
+  }
+
+  .group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .groupLabel {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-13);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: 2.5rem;
+    padding-inline: var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-15);
+    color: var(--ink);
+    text-decoration: none;
+    text-align: start;
+  }
+
+  /* O destino que só existe aqui quando a barra inferior não tem célula para
+     ele (docs/DESIGN.md, spec 0010 §10.6). Acima de 52rem o item vive na
+     lateral, e repeti-lo aqui daria duas portas — e duas marcas de
+     `aria-current="page"` — para a mesma tela.
+     Sintaxe clássica de media query, e não a de intervalo: o jsdom descarta a
+     folha INTEIRA ao encontrar a de intervalo, e o teste passaria a rodar sem
+     estilo nenhum (a mesma nota do AppShell.module.css). */
+  .soNoCelular {
+    display: none;
+  }
+
+  @media (max-width: 52rem) {
+    .soNoCelular {
+      display: flex;
+    }
+
+    hr.soNoCelular {
+      display: block;
+    }
+  }
+
+  /* A seção corrente é marcada por PESO e por fundo, nunca só por cor. */
+  .item[aria-current="page"] {
+    background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .item:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-offset) * -1);
+  }
+
+  /* O rádio nativo continua no DOM e focável; o desenho é do rótulo. */
+  .radio {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .item:has(.radio:focus-visible) {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-offset) * -1);
+  }
+
+  .mark {
+    display: inline-flex;
+    flex: none;
+    inline-size: 16px;
+    block-size: 16px;
+    color: var(--accent);
+  }
+
+  @media (hover: hover) {
+    .item:hover {
+      background-color: color-mix(in oklch, var(--accent), transparent 92%);
+    }
+
+    .trigger:hover {
+      color: var(--ink);
+    }
+  }
+}

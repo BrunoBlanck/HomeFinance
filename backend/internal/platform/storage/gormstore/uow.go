@@ -27,15 +27,21 @@ func NewUnitOfWork(db *storage.DB) *UnitOfWork { return &UnitOfWork{db: db} }
 // Reentrante: se o contexto já carrega uma transação, reaproveitamos em vez
 // de abrir outra (o GORM criaria um savepoint aninhado, o que muda a
 // semântica de rollback sem necessidade).
+//
+// Todo erro de saída passa por storage.ComErroDeContexto. A raiz está na
+// abertura da conexão (storage/ctxerr.go), que já traduz o "interrupted (9)"
+// do driver em erro de prazo/cancelamento reconhecível por `errors.Is`; a
+// repetição AQUI cobre o que não é um comando SQL — o Begin, o Commit e o erro
+// que a própria fn devolve — e é um no-op quando a raiz já fez o trabalho.
 func (u *UnitOfWork) Do(ctx context.Context, fn func(ctx context.Context) error) error {
 	if _, ok := txFromContext(ctx); ok {
-		return fn(ctx)
+		return storage.ComErroDeContexto(ctx, fn(ctx))
 	}
 	err := u.db.Gorm().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(withTx(ctx, tx))
 	})
 	if err != nil {
-		return fmt.Errorf("transação: %w", err)
+		return storage.ComErroDeContexto(ctx, fmt.Errorf("transação: %w", err))
 	}
 	return nil
 }

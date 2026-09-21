@@ -64,6 +64,8 @@ Decisão do usuário (09/09/2026): **nenhuma conta existe sem e-mail verificado*
 - Validação na borda (handler): tipo, tamanho máximo, faixa, formato. Corpos com `http.MaxBytesReader` (padrão 1 MiB). Decoder JSON com `DisallowUnknownFields`.
 - Dinheiro: `int64` centavos; rejeitar valores absurdos (> R$ 1 bilhão) e negativos onde não fazem sentido.
 - Uploads (futuros: comprovantes): validar tipo real (magic bytes), tamanho, nome gerado pelo servidor, armazenar fora da árvore servida.
+- **Query malformada é 400 na borda; o erro do `url.ParseQuery` NUNCA é descartado** (18/09/2026). `r.URL.Query()` chama `url.ParseQuery` e joga o erro fora, e desde o Go 1.17 esse parser **pula o par inteiro** que não consegue ler — `;` cru, `%` solto, escape percentual inválido, chave quebrada. A borda recebe **chave ausente** onde o cliente mandou um valor, e "ausente" quase sempre significa "sem filtro": `?accountGroup=credit;debit` respondia 200 com TODAS as contas, `?kindGroup=expense;` listava tudo e `?includeArchived=true;` devolvia a lista sem as arquivadas com a tela afirmando o contrário. A guarda é o middleware `httpserver.WellFormedQuery`, **o mais interno da cadeia** (dentro de `SecurityHeaders`/`CORS`, depois do `CSRFGuard` e depois do `RateLimit`, para a requisição malformada continuar gastando balde): 400 `VALIDATION_FAILED` genérico, **sem `fields`**, sem ecoar a query, sem ecoar o valor e sem ecoar o texto do erro da stdlib (que carrega o escape recebido) — e sem log próprio, porque o `AccessLog` já registra método, caminho e status, e query não entra em log. Blocklist de `;` foi **descartada**: deixaria `%zz` e `%` abertos. `%3B` (o `;` escapado) é query bem formada e segue para a allowlist do parâmetro, que o recusa com o campo certo.
+- **Id de recurso que entra na escrita é gravado CANÔNICO** (18/09/2026). A posse de um id é conferida em SQL (`WHERE id = ?`), cuja semântica vem da **collation** da coluna: `varchar(36)` sem collation declarada é `utf8mb4_0900_ai_ci` no MySQL 8 (ignora caixa e acento) e `CI_AS` com padding ANSI no MSSQL (ignora espaço à direita); em SQLite e PostgreSQL o `=` é binário. A **identidade** do mesmo id é comparada depois em Go, byte a byte (o recorte crédito/débito do relatório, o painel, o nome da conta na listagem, o filtro de `/transfers`). Quem carrega a entidade e grava a string do cliente deixa uma linha que o SQL encontra e que **nenhum mapa em Go encontra** — o gasto some do quadro "Despesas no crédito" em silêncio. Regra: **onde a entidade já foi carregada, grave o `.ID` dela**, e leve o `.ID` também para todo filtro de leitura que depois vira chave de mapa. A forma canônica do id é conferida na borda (`id.IsCanonical`), o que fecha espaço, controle e aspas; a caixa trocada é forma válida e só se fecha canonizando. Validação de forma **não** substitui canonização, e vice-versa.
 
 ## 4. Vazamento de informação
 
@@ -77,6 +79,46 @@ Decisão do usuário (09/09/2026): **nenhuma conta existe sem e-mail verificado*
 - Headers em toda resposta: `X-Content-Type-Options: nosniff`, `Content-Security-Policy` restritiva, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
 - CORS: origem exata do frontend via config — nunca `*` com credenciais.
 - Rate limiting global e por rota sensível (login, refresh, criação de conta) — `golang.org/x/time/rate`, por IP e por conta.
+
+### 5.1 Limites de abuso — baldes por rota
+
+Todo teto vive em `config.DefaultRateLimits()` e é aplicado como middleware na **tabela de rotas** (`cmd/api/routes.go`), nunca dentro de um handler: limitador escondido no handler não aparece na tabela, não é revisável e não é testável junto com os outros. Todo 429 devolve `Retry-After` e corpo genérico — sem casa, sem id, sem nome de rota.
+
+A chave de um balde **por casa** é o **HMAC do `household_id`** com o pepper da aplicação, pelo mesmo motivo do e-mail: o id em claro nunca entra no mapa do limitador.
+
+**`PATCH /transactions/{id}` tem balde próprio desde 17/09/2026** (decisão do usuário; emenda §11 da spec 0005): **120/h por casa**. Antes, o único teto sobre ele era o global de 100/min por IP — que não é por casa. A rota grava uma linha **e escreve uma linha de `audit_log` a cada chamada**, então sem teto por casa quem tivesse endereços sobrando enchia a auditoria de uma casa de graça. O número é generoso de propósito (categorizar a fatura recém-importada é uma **rajada legítima**: a pessoa varre a lista clicando categoria em lançamento após lançamento) e ainda assim **finito**.
+
+### 5.2 Perfil de limites por ambiente — `RATE_LIMITS_PROFILE`
+
+Decisão do usuário (17/09/2026). A suíte de ponta a ponta bate nos tetos reais — 5 cadastros/h por IP e 10 importações/h por casa foram atingidos **exatamente** (5/5 e 10/10) em 09/2026, e o próximo cenário de importação não cabe. A saída é um **perfil**, não um afrouxamento:
+
+| Valor | Efeito |
+|---|---|
+| `default` (padrão, e o que vale sem a variável) | `config.DefaultRateLimits()` — os limites de produção, byte a byte. |
+| `test` | `ProfileRateLimits("test")` — o conjunto **inteiro** substituído por tetos altos para robô. Exige `APP_ENV=test`. |
+| `dev` | `ProfileRateLimits("dev")` — os padrões de produção com **um grupo** elevado: as **cotas** da importação (upload 50/h por casa, 100/h por IP, confirm 150/h), com o **estouro fixado na cota do padrão** (10, 20 e 30). Mais nada muda. Exige `APP_ENV=development` **declarado**. Decisão do usuário, 18/09/2026. |
+
+**Desenho, e por que é este:**
+
+- **Um interruptor só, de conjunto.** Não existe — e não pode passar a existir — override por regra (`RATE_LIMIT_IMPORT_UPLOAD=9999`). Uma variável solta por limite é indistinguível de configuração legítima num manifesto e é exatamente o caminho pelo qual um teto frouxo vaza para produção sem aparecer em revisão nenhuma. Teste que trava isso: `TestSemOInterruptorOAmbienteNaoMudaNenhumLimite`.
+- **Produção recusa qualquer perfil que não seja `default`.** A trava compara com o **padrão**, não com a lista dos perfis frouxos de hoje: `test`, `dev` e o que vier amanhã já nascem barrados. A configuração **falha no boot**, com a mesma força de `MAILER=console` em produção. O valor é normalizado (caixa e espaços) antes da comparação, então `TEST`, ` dev ` e `Test` caem na mesma trava. Teste: `TestProducaoRecusaQualquerPerfilNaoPadrao`.
+- **Cada perfil não-padrão é amarrado ao seu ambiente** (achado B2). `test` só sobe com `APP_ENV=test`; `dev` só com `APP_ENV=development`. Não basta "não ser produção": quem quiser o perfil precisa declarar, na mesma configuração, que máquina é aquela. Testes: `TestPerfilDeTesteExigeAppEnvTest` e `TestPerfilDeDesenvolvimentoExigeAppEnvDevelopment`.
+- **E o ambiente precisa ter sido DITO** (achado F1, 18/09/2026). `development` é o `envDefault` do campo `APP_ENV`: sem esta trava, a amarração acima seria satisfeita pelo **silêncio**, e uma única variável solta (`RATE_LIMITS_PROFILE=dev`) num manifesto que nunca setou `APP_ENV` — o caso "homologação que virou produção sem ninguém trocar o rótulo" — bastaria para elevar tetos. Perfil não-padrão custa **duas** declarações explícitas. Teste: `TestPerfilNaoPadraoExigeAppEnvExplicito`.
+- **`dev` não é o `test` com outro nome.** Ele eleva **só a importação** — a rota que quem constrói a feature repete dezenas de vezes numa tarde, contra um teto dimensionado para 10 arquivos/h de uma casa real. Auth (login, cadastro, código de 6 dígitos), global por IP e as rotas de detecção continuam nos **tetos de produção** em desenvolvimento, que é onde esses limites precisam ser exercitados à mão. A varredura é por reflexão, campo a campo: `TestPerfilDeDesenvolvimentoSobeSoAImportacao`.
+- **Perfil desconhecido é falha, não silêncio.** `RATE_LIMITS_PROFILE=testing` não "cai no padrão": o boot morre. Quem digitou errado quis afrouxar e precisa descobrir que não afrouxou.
+- **O boot avisa em `Warn`.** Com **qualquer** perfil diferente de `default`, a API loga `"perfil de limites de abuso NÃO-PADRÃO ativo — use apenas em teste automatizado ou na máquina de desenvolvimento, NUNCA em produção"`, e `rate_limits_profile` passa a sair em toda linha que loga a configuração.
+- **Frouxo não é "sem limite".** Os perfis **elevam tetos** mantendo a forma das regras: mesmas janelas, todo limite finito, `RegisterMailPerAccount > Register` preservado (é o invariante da negação de cadastro por procuração) e o estouro da rota cara continua menor que a cota (achado A2). No `dev` as proporções da importação também são preservadas — o teto por IP é o dobro do teto por casa e o confirm é o triplo do upload, como no padrão. Coberto por `TestPerfilDeTesteMantemAFormaDasRegras` e por `TestRotasDeEscritaEmMassaTemEstouroMenorQueACota`, que varre os **três** perfis.
+- **No `dev`, sobe a cota por hora — não o estouro** (achado F2, 18/09/2026). As três regras de importação não declaram `Burst` no padrão, e `Burst` zero significa *estouro = cota*: multiplicar a cota por 5 sem mais nada deixaria **50 uploads e 150 confirms simultâneos** de uma casa só. O confirm segura uma conexão do pool dentro de transação aberta (`DB_MAX_OPEN_CONNS` = 25) e cada operação de importação empilha ~46 MiB de heap vivo (a conta está em `internal/textmatch/matcher.go`) — é a forma do achado A2 em rotas que ele não cobria. Por isso o perfil fixa o estouro **na cota do padrão** (10/20/30): a concorrência instantânea de uma casa em desenvolvimento é exatamente a que ela já tinha em produção; o que muda é quantas vezes por hora ela repete. Teste: `TestPerfilDeDesenvolvimentoSobeSoAImportacao`.
+- **Os valores de produção não mudaram.** `TestSemVariavelDePerfilOsLimitesSaoOsPadroes` compara o conjunto inteiro com `DefaultRateLimits()` em `development` e em `production`.
+
+**Uso:**
+
+- `test` — só a suíte automatizada, exportando `RATE_LIMITS_PROFILE=test` no processo da API de teste (o E2E sobe a API em `frontend/e2e/support/global-setup.ts`, com `APP_ENV=test`).
+- `dev` — a máquina de quem está desenvolvendo, quando os 10 uploads/h da importação atrapalham o trabalho à mão: `APP_ENV=development` + `RATE_LIMITS_PROFILE=dev`, as **duas** declaradas.
+
+O `.env.example` **não** traz `RATE_LIMITS_PROFILE`, e isso é deliberado: ele é copiado para `.env` sem leitura, então uma linha ativa faria o perfil nascer ligado em toda cópia nova. Se um dia entrar ali, entra **comentada**.
+
+Nenhum manifesto de produção contém essa variável — e se contiver, o serviço não sobe.
 
 ## 6. Frontend
 

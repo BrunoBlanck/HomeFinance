@@ -1,0 +1,161 @@
+@layer components {
+  .corpo {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* A frase-resumo é o dado principal do diálogo: "2 pares viram
+     transferência; 1 lançamento fica como está." Fica em --ink, no tamanho de
+     leitura — não é apoio. */
+  .resumo {
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  /* A tabela ganha a própria moldura em vez de sangrar até a borda do diálogo:
+     ela é uma prévia dentro de um pedido, não a superfície da tela. */
+  .tabela {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  /* "Nubank → C6": nome, seta e nome alinhados pelo meio. A seta não encolhe:
+     o flex espremeria o SVG a zero na linha mais longa, e a direção do
+     dinheiro sumiria justamente onde os nomes são maiores. */
+  .setaEntreContas {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+  }
+
+  /* O nome inteiro é uma unidade; a seta não encolhe, senão o flex a espremeria
+     a zero na linha mais longa e a direção do dinheiro sumiria justamente onde
+     os nomes são maiores. */
+  .nomeDeConta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+
+    & > svg {
+      flex: none;
+    }
+  }
+
+  .contas {
+    display: inline-flex;
+    color: var(--ink);
+  }
+
+  /* A coluna de contas é de largura mínima, e `min` no DataTable vem com
+     `white-space: nowrap`. Aqui ela QUEBRA: o diálogo tem 34rem, e "Bruno
+     Nubank → Bruno C6" numa linha só empurra a coluna Valor para fora da
+     moldura (medido em 17/09/2026 a 1280px). Quebrando, a tabela inteira cabe
+     e a descrição fica com mais espaço antes da reticência. */
+  .tabela td:has(> .contas) {
+    white-space: normal;
+  }
+
+  /* Duas linhas antes do corte, em QUALQUER largura: o diálogo tem 34rem e a
+     coluna elástica fica com pouco mais de 8rem — numa linha só, "Pix enviado -
+     BRUNO RIBEIRO BLANCK" vira "Pix enviado - BRU…" e a descrição deixa de
+     identificar o lançamento, que é a razão de ela estar na prévia. */
+  .descricao {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    color: var(--ink);
+  }
+
+  .semDescricao {
+    color: var(--ink-muted);
+  }
+
+  /* Segunda linha da descrição: a proveniência (par) ou o motivo (sem par) e,
+     abaixo de 40rem, as contas que a coluna escondida deixou de mostrar. */
+  .apoio {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1);
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Só existe onde o DataTable escondeu a coluna Contas. Esconder coluna só é
+     honesto quando o conteúdo reaparece. */
+  .contasEstreitas {
+    display: none;
+    align-items: baseline;
+    gap: var(--space-1);
+  }
+
+  /* Linha de proveniência: pontuação é texto em tabular-nums — sem tom, sem
+     barra, sem ícone de "confiança". Quebra onde precisar: a palavra-chave que
+     decidiu pode ser a descrição inteira (regra 1 da §3 casa a frase toda), e
+     numa linha só ela passaria por cima da coluna Valor. */
+  .proveniencia {
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  .motivo {
+    color: var(--ink-muted);
+  }
+
+  .corte {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* <details> do estado vazio: fechado por padrão, é auditoria. */
+  .detalhes {
+    border-block-start: 1px solid var(--border);
+    padding-block-start: var(--space-3);
+  }
+
+  .sumario {
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .detalhes[open] .sumario {
+    margin-block-end: var(--space-3);
+  }
+
+  /* Rodapé: os dois botões num contêiner que QUEBRA linha. "Converter 12
+     pares" ao lado de "Cancelar" não cabe em 375px, e o rótulo com o número é
+     normativo — o que cede é a linha, não a palavra. */
+  .rodape {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  @media (max-width: 40rem) {
+    /* Linha inteira: as contas são a informação que a coluna escondida deixou
+       de dar, e não um apêndice da proveniência. */
+    .contasEstreitas {
+      display: flex;
+      flex-basis: 100%;
+    }
+  }
+}

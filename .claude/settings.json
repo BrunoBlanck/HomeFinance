@@ -13,7 +13,10 @@
       "Bash(npm audit)",
       "Bash(git status)",
       "Bash(git diff *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(npx playwright *)",
+      "Bash(npx biome *)",
+      "Bash(gosec *)"
     ],
     "deny": [
       "Read(.env)",
@@ -29,6 +32,12 @@
       {
         "matcher": "Write|Edit",
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt-backend.sh\"",
+            "timeout": 15,
+            "statusMessage": "Formatando Go com gofmt"
+          },
           {
             "type": "command",
             "command": "f=$(grep -o '\"file_path\"[^,}]*' | head -n1); if printf %s \"$f\" | grep -qE '[\\\\/]backend[\\\\/]'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"Lembrete HomeFinance: arquivo do backend foi alterado. Regra do projeto: nenhuma entrega e concluida sem revisao de seguranca aprovada - antes de finalizar, execute /revisao-seguranca (agente revisor-seguranca) conforme docs/SEGURANCA.md.\"}}'; fi",

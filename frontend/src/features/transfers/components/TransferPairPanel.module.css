@@ -1,0 +1,78 @@
+@layer components {
+  /* Mora dentro do Panel da tela, logo abaixo da faixa de filtros: separa-se
+     da tabela por borda, nunca por sombra. */
+  .painel {
+    padding: var(--space-4);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .grade {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+
+  .coluna {
+    min-inline-size: 0;
+  }
+
+  .tituloDaLista {
+    padding-block-end: var(--space-1);
+    font-size: var(--text-13);
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+
+  /* Uma <dl> de números alinhados à direita, NÃO cartões com número gigante:
+     conferir o que foi e o que voltou é uma leitura vertical. */
+  .lista {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .linha {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding-block: var(--space-2);
+    font-size: var(--text-15);
+  }
+
+  .linha + .linha {
+    border-block-start: 1px solid var(--border);
+  }
+
+  .linha dt {
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink-muted);
+  }
+
+  .linha dd {
+    flex: none;
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* A frase de direção: a única linha da tela que fala em prosa sobre o
+     dinheiro. Nomes e valor em <strong>, para os olhos pousarem neles. */
+  .frase {
+    margin-block-start: var(--space-3);
+    max-inline-size: 64ch;
+    font-size: var(--text-15);
+    line-height: 1.55;
+    color: var(--ink);
+  }
+
+  @media (max-width: 40rem) {
+    .grade {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-4);
+    }
+  }
+}

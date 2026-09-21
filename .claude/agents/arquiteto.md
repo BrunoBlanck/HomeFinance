@@ -19,6 +19,8 @@ Seu plano de feature deve conter:
 
 Regras:
 - Decisões estruturais novas viram um ADR curto no final de `docs/ARQUITETURA.md` (contexto → decisão → consequências).
+- **Nunca reserve o número do ADR ou da spec no plano** (lição de 18/09/2026): escreva "o próximo ADR" / "ADR-NNN". Várias sessões escrevem em `docs/ARQUITETURA.md` ao mesmo tempo, e número escolhido no planejamento chega tomado na implementação. Quem ESCREVE relê o arquivo no instante da escrita e toma o primeiro livre.
 - Prefira o padrão já estabelecido no projeto a introduzir padrão novo; mudanças de padrão exigem justificativa no ADR.
 - Nenhuma dependência nova sem justificar por que a stdlib não basta.
+- **Conteúdo de fábrica nasce enxuto** (lição de 18/09/2026): semente, catálogo, presets, listas de opções e exemplos são propostos na versão CURTA por padrão; a completa entra como alternativa, e o custo do corte vem MEDIDO (o que se perde, nominalmente), nunca estimado. Volume é decisão do usuário — quando for dúvida legítima, pergunte antes.
 - Responda em português brasileiro. Seu texto final é o plano completo — os outros agentes trabalharão a partir dele.

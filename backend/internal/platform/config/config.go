@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -165,11 +166,36 @@ type Config struct {
 	Mail   MailConfig
 	SMTP   SMTPConfig
 
-	// RateLimits não vem de ambiente de propósito: são limites de segurança,
-	// não sintonia operacional. Afrouxá-los exige mudança de código revisada
-	// (a §7 da spec 0001 fixa os padrões).
+	// RateLimitProfile é o ÚNICO interruptor de ambiente sobre os limites de
+	// abuso (decisão do usuário, 17/09/2026). Valores: "default" (produção, e o
+	// padrão quando a variável não existe), "test" (perfil frouxo da suíte
+	// automatizada) e "dev" (máquina de desenvolvimento: só os tetos da
+	// importação sobem — decisão do usuário, 18/09/2026).
+	//
+	// Por que um interruptor de CONJUNTO e não uma variável por regra: um
+	// `RATE_LIMIT_IMPORT_UPLOAD=9999` esquecido num manifesto é indistinguível
+	// de configuração legítima e não aparece em revisão nenhuma. Um perfil
+	// nomeado é uma decisão visível, e as travas estão todas em validate():
+	// perfil não-padrão exige APP_ENV EXPLÍCITO, exige o ambiente que lhe
+	// corresponde, e em produção nenhum deles sobe.
+	RateLimitProfile string `env:"RATE_LIMITS_PROFILE" envDefault:"default"`
+
+	// RateLimits NÃO vem regra a regra do ambiente, de propósito: são limites
+	// de segurança, não sintonia operacional. O conjunto inteiro é escolhido
+	// por RateLimitProfile e, sem ele, é exatamente DefaultRateLimits() (a §7
+	// da spec 0001 fixa os padrões). Mudar um valor de produção continua
+	// exigindo mudança de código revisada.
 	RateLimits RateLimits
 }
+
+// UsesLooseRateLimits informa se algum perfil NÃO-PADRÃO de limites está
+// ativo. O boot usa isto para avisar em Warn — um servidor com qualquer teto de
+// abuso afrouxado não pode passar despercebido no log.
+//
+// A comparação é contra o PADRÃO, e não contra a lista de perfis frouxos, de
+// propósito: o perfil que alguém acrescentar amanhã já nasce avisando. Perfil
+// desconhecido nem chega aqui — a validação mata o boot antes.
+func (c Config) UsesLooseRateLimits() bool { return c.RateLimitProfile != RateLimitProfileDefault }
 
 // IsProduction informa se a aplicação está em produção.
 func (c Config) IsProduction() bool { return c.AppEnv == EnvProduction }
@@ -187,6 +213,9 @@ func (c Config) LogValue() slog.Value {
 		// só um booleano de diagnóstico.
 		slog.Bool("https_only", c.Cookie.Secure),
 		slog.Bool("automigrate", c.DB.AutoMigrate),
+		// Visível em toda linha que loga a config: quem lê o log de um
+		// servidor sabe, sem investigar, se ele está com os tetos frouxos.
+		slog.String("rate_limits_profile", c.RateLimitProfile),
 	)
 }
 
@@ -216,12 +245,45 @@ func LoadFrom(environ map[string]string) (Config, error) {
 	cfg.Log.Level = strings.ToLower(strings.TrimSpace(cfg.Log.Level))
 	cfg.Log.Format = strings.ToLower(strings.TrimSpace(cfg.Log.Format))
 	cfg.HTTP.CORSOrigins = normalizeOrigins(cfg.HTTP.CORSOrigins)
-	cfg.RateLimits = DefaultRateLimits()
-
-	if err := cfg.validate(); err != nil {
+	cfg.RateLimitProfile = strings.ToLower(strings.TrimSpace(cfg.RateLimitProfile))
+	if cfg.RateLimitProfile == "" {
+		cfg.RateLimitProfile = RateLimitProfileDefault
+	}
+	// A escolha acontece DEPOIS da validação passar: config inválida não
+	// devolve Config nenhuma, então não existe estado intermediário com o
+	// perfil frouxo montado num ambiente que o recusa.
+	//
+	// appEnvExplicito distingue "APP_ENV=development" DECLARADO do default
+	// implícito do campo — ver a trava correspondente em validate.
+	//
+	// Chave DECLARADA VAZIA não conta como declaração (achado R1 da segunda
+	// rodada da revisão): com `APP_ENV=` a lib de ambiente aplica o envDefault
+	// exatamente como se a chave não existisse, então quem aceitasse a chave
+	// vazia estaria aceitando o padrão implícito pela porta dos fundos — e é
+	// uma forma comum de manifesto, a chave preparada sem valor.
+	valorAppEnv, appEnvDeclarado := lookupEnv(environ, "APP_ENV")
+	appEnvExplicito := appEnvDeclarado && strings.TrimSpace(valorAppEnv) != ""
+	if err := cfg.validate(appEnvExplicito); err != nil {
 		return Config{}, err
 	}
+	cfg.RateLimits = profileRateLimits(cfg.RateLimitProfile)
 	return cfg, nil
+}
+
+// lookupEnv responde se uma variável foi DECLARADA (e com que valor), na mesma
+// fonte que a configuração acabou de ler: o mapa explícito, quando há um, ou o
+// ambiente do processo.
+//
+// Existe porque envDefault apaga a diferença entre "a variável diz development"
+// e "ninguém disse nada": as duas chegam em Config como "development". Para
+// quase tudo isso é o certo; para a trava do perfil não-padrão, não — o default
+// implícito é justamente o caso do manifesto que nunca setou APP_ENV.
+func lookupEnv(environ map[string]string, chave string) (string, bool) {
+	if environ != nil {
+		v, ok := environ[chave]
+		return v, ok
+	}
+	return os.LookupEnv(chave)
 }
 
 func normalizeOrigins(in []string) []string {
@@ -240,7 +302,10 @@ func normalizeOrigins(in []string) []string {
 // minSecretBytes é o piso de 256 bits exigido por docs/SEGURANCA.md §1.
 const minSecretBytes = 32
 
-func (c Config) validate() error {
+// validate recebe appEnvExplicito — se APP_ENV foi DECLARADO no ambiente lido,
+// e não herdado do envDefault do campo. Só a trava do perfil não-padrão usa
+// isso; todo o resto da validação enxerga o valor efetivo, como sempre.
+func (c Config) validate(appEnvExplicito bool) error {
 	var problems []string
 	add := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -250,6 +315,54 @@ func (c Config) validate() error {
 	case EnvDevelopment, EnvTest, EnvProduction:
 	default:
 		add("APP_ENV deve ser development, test ou production")
+	}
+
+	// Perfil de limites: só os três nomes existem. Um valor desconhecido é
+	// FALHA e não "cai no padrão em silêncio" — quem digitou "testing" quis
+	// afrouxar e precisa descobrir que não afrouxou.
+	switch c.RateLimitProfile {
+	case RateLimitProfileDefault, RateLimitProfileTest, RateLimitProfileDev:
+	default:
+		add("RATE_LIMITS_PROFILE deve ser %q, %q ou %q",
+			RateLimitProfileDefault, RateLimitProfileTest, RateLimitProfileDev)
+	}
+
+	// O perfil frouxo exige APP_ENV=test, e não apenas "não ser produção"
+	// (achado B2 da revisão de segurança). EnvTest existia na allowlist de
+	// ambientes e não governava nada; amarrar os dois interruptores fecha o
+	// caminho em que alguém sobe uma instância de desenvolvimento exposta —
+	// ou um ambiente rotulado development em infraestrutura de verdade — com
+	// TODOS os limites de abuso elevados. A trava específica de produção
+	// continua logo abaixo, com a sua própria mensagem: duas barreiras, e a
+	// que falhar primeiro já diz o motivo certo.
+	if c.RateLimitProfile == RateLimitProfileTest && c.AppEnv != EnvTest {
+		add("RATE_LIMITS_PROFILE=%s só é aceito com APP_ENV=%s (é o perfil da suíte automatizada, "+
+			"que eleva TODOS os limites de abuso — docs/SEGURANCA.md §5)", RateLimitProfileTest, EnvTest)
+	}
+
+	// O perfil de desenvolvimento segue a MESMA regra, e pelo mesmo motivo:
+	// cada perfil não-padrão é amarrado ao seu ambiente. Ele sobe só os tetos
+	// da importação, mas "só a importação" continua sendo teto de abuso — quem
+	// o quiser precisa declarar, na mesma configuração, que aquilo é uma
+	// máquina de desenvolvimento.
+	if c.RateLimitProfile == RateLimitProfileDev && c.AppEnv != EnvDevelopment {
+		add("RATE_LIMITS_PROFILE=%s só é aceito com APP_ENV=%s (é o perfil da máquina de "+
+			"desenvolvimento, que eleva os tetos da importação — docs/SEGURANCA.md §5.2)",
+			RateLimitProfileDev, EnvDevelopment)
+	}
+
+	// ...e a amarração acima só vale alguma coisa se APP_ENV tiver sido DITO
+	// (achado F1 da revisão de segurança de 18/09/2026). "development" é o
+	// envDefault do campo: sem esta trava, a exigência de ambiente do perfil
+	// dev seria satisfeita pelo SILÊNCIO, e uma variável solta num manifesto
+	// que nunca setou APP_ENV — o caso "homologação que virou produção sem
+	// ninguém trocar o rótulo" — bastaria para subir com os tetos elevados.
+	// Com ela, todo perfil não-padrão custa DUAS declarações explícitas, que é
+	// o que o desenho sempre afirmou custar.
+	if c.RateLimitProfile != RateLimitProfileDefault && !appEnvExplicito {
+		add("RATE_LIMITS_PROFILE=%s exige APP_ENV declarado explicitamente (o padrão implícito "+
+			"%q não serve: perfil não-padrão custa duas decisões, não uma — docs/SEGURANCA.md §5.2)",
+			c.RateLimitProfile, EnvDevelopment)
 	}
 
 	// Segredos: piso de 32 bytes em QUALQUER ambiente (D8).
@@ -381,6 +494,18 @@ func (c Config) validate() error {
 		}
 		if c.DB.Driver == DriverSQLite {
 			add("DB_DRIVER=sqlite não é aceito em produção")
+		}
+		// A trava dos perfis não-padrão. Mesma família do MAILER=console: um
+		// recurso que só faz sentido fora de produção não pode simplesmente
+		// "estar ligado" nela — o boot morre, alto, com o motivo.
+		//
+		// A condição é "diferente do padrão", e não a lista dos perfis frouxos
+		// de hoje: o perfil que alguém acrescentar amanhã já nasce barrado aqui
+		// mesmo que esqueça de vir a esta função.
+		if c.RateLimitProfile != RateLimitProfileDefault {
+			add("RATE_LIMITS_PROFILE=%s não é aceito em produção — só %q é, porque os demais "+
+				"afrouxam limites de abuso (docs/SEGURANCA.md §5.2)",
+				c.RateLimitProfile, RateLimitProfileDefault)
 		}
 	}
 

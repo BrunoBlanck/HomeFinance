@@ -1,0 +1,233 @@
+@layer components {
+  /* O controle da célula (docs/DESIGN.md, E2c (h) §1 e §1-bis).
+
+     Um componente, DOIS estados fechados e UM aberto: fechado, a lacuna e a
+     linha categorizada diferem — uma é pendência, a outra é dado; aberto, são
+     idênticos, porque a pessoa está editando a categoria da linha, e isso é uma
+     coisa só. Regra curta: fechado difere, aberto é o mesmo.
+
+     Daí a base `.atalho` (a caixa e o aberto) e as duas variantes, que só
+     dizem o que difere fechado. A borda transparente existe na base para a
+     caixa já estar reservada: nada pula quando o editor abre. */
+  .atalho {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-block-size: var(--control-h-sm);
+    padding-inline: var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+
+    /* Aberto: IDÊNTICO nos dois — a borda fecha (a categoria está sendo
+       escolhida), o texto sobe para --ink e o chevron vira. O fundo é o mesmo
+       fantasma do hover. O fundo diz "pode"; a borda diz "está aberto". */
+    &[aria-expanded="true"] {
+      border-style: solid;
+      border-color: var(--border-strong);
+      color: var(--ink);
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    }
+  }
+
+  /* Caixa fixa de 14px (o tamanho do ícone): numa coluna de largura mínima o
+     flex encolheria o svg a zero. Mesmo remédio do `.icon` do Button. */
+  .chevron {
+    display: inline-flex;
+    flex: none;
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    align-items: center;
+    justify-content: center;
+    transition: rotate var(--motion-base) var(--ease);
+
+    & svg {
+      flex: none;
+    }
+  }
+
+  /* Fechado, pendente — a lacuna. Não é variante do Button: é o quarto
+     portador de estado, a forma do controle, uma lacuna a preencher e não uma
+     ação a disparar. Tracejado é a linguagem que o Badge muted já usa para
+     "vazio", mas em --border-strong, porque é controle e precisa de 3:1. Peso
+     400 de propósito: é estado, não chamada. O tracejado é EXCLUSIVO da
+     pendência — uma linha resolvida não o usa. */
+  .lacuna {
+    border-style: dashed;
+    border-color: var(--border-strong);
+    color: var(--ink-muted);
+    font: 400 var(--text-13) var(--font-ui);
+  }
+
+  /* Fechado, categorizada — o nome na tinta do lugar, e só o chevron muted.
+     Herdar font e color é o que mantém a densidade da tabela: na célula, o que
+     o <span> tinha (--text-15/--ink); na secundária, o que o texto tinha
+     (--text-13/--ink-muted). Pintar o nome de --ink na secundária faria o nome
+     saltar do `Nubank ·` ao lado e usaria tom como affordance — esse trabalho
+     é do chevron. */
+  .categorizada {
+    font: inherit;
+    color: inherit;
+
+    /* Sempre visível: é o único portador da affordance e precisa existir onde
+       não há hover. */
+    & .chevron {
+      color: var(--ink-muted);
+    }
+
+    &[aria-expanded="true"] .chevron {
+      color: inherit;
+    }
+
+    /* Caixa visível alinha a caixa; caixa invisível alinha o TEXTO. A Badge
+       Transferência e a lacuna encostam em --cell-pad; esta recua o padding
+       mais a borda, para o nome ficar na vertical do cabeçalho `Categoria` e
+       do texto das outras colunas, onde o <span> estava. */
+    &[data-instancia="coluna"] {
+      margin-inline-start: calc(-1 * (var(--space-2) + 1px));
+    }
+
+    /* Na secundária o nome pode ter 60 caracteres: quebra dentro do botão em
+       vez de estourar a moldura. Sem margem negativa aqui: não há cabeçalho
+       para alinhar, e o nome fica à mesma distância do `·` que o
+       `Sem categoria` da lacuna. */
+    &[data-instancia="secundaria"] {
+      white-space: normal;
+      text-align: start;
+    }
+  }
+  /* O chevron virado é o sinal de aberto, igual nos dois estados fechados.
+     Depois das variantes porque a especificidade sobe de cima para baixo. */
+  .atalho[aria-expanded="true"] .chevron {
+    rotate: 180deg;
+  }
+
+  @media (hover: hover) {
+    .atalho:hover {
+      color: var(--ink);
+      background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    }
+
+    .categorizada:hover .chevron {
+      color: inherit;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .atalho,
+    .chevron {
+      transition: none;
+    }
+  }
+
+  /* O editor — conteúdo da linha de detalhe (docs/DESIGN.md, E2c (h) §2).
+
+     Um <fieldset> em linha: select, fichas, dica e ações, na ordem do DOM,
+     que é a ordem do Tab. Sem borda, sem fundo próprio, sem sombra: a linha
+     se expandiu, e é só isso que aconteceu. */
+  .editor {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    /* O fieldset nasce com min-inline-size: min-content e estouraria a célula
+       antes de quebrar a linha. */
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+
+    /* As opções mais longas não ditam a largura: fechado, o select ganha
+       reticências; a lista aberta é do sistema e mostra tudo. */
+    & select {
+      max-inline-size: 20rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  /* As fichas de aprender: o Button quiet sm do sistema, sem estilo inventado.
+     O que este arquivo desenha é só o arranjo e a ficha que virou fato. */
+  .fichas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .rotulo {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* A palavra que (a) gravou e (b) não acompanhou: texto estático com o ícone
+     de feito, na altura do botão que ela substituiu, para a linha não pular. */
+  .gravada {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-block-size: var(--control-h-sm);
+    padding-inline: var(--space-2);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* A frase curta que explica um limite do campo ao lado: a categoria lotada
+     de palavras-chave e, desde a emenda §19, a categoria atual que não pode
+     ser escolhida de novo. Uma forma só para as duas — são a mesma coisa para
+     quem lê. */
+  .nota {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* A dica de consequência ocupa a linha inteira: é a frase que explica o que
+     a ficha pressionada vai fazer com o resto do mês. */
+  .dica {
+    flex-basis: 100%;
+    font-size: var(--text-13);
+    line-height: 1.45;
+    color: var(--ink-muted);
+  }
+
+  .vazio {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    font-size: var(--text-15);
+    color: var(--ink);
+  }
+
+  /* Na mesma linha, à direita; ao quebrar, desce e fica à direita, como
+     rodapé de diálogo. */
+  .acoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-inline-start: auto;
+  }
+
+  @media (max-width: 40rem) {
+    .editor {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--space-3);
+    }
+
+    .acoes {
+      margin-inline-start: 0;
+    }
+  }
+}

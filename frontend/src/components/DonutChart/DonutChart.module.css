@@ -1,0 +1,184 @@
+@layer components {
+  /* Rosca + legenda + legenda escrita, em grade. Alinhada à esquerda como tudo
+     no app: bloco centralizado quebra o eixo de leitura da tela (a mesma regra
+     do EmptyState). */
+  .figura {
+    display: grid;
+    grid-template-columns: auto minmax(0, 24rem);
+    grid-template-areas:
+      "rosca legenda"
+      "figcaption figcaption";
+    column-gap: var(--space-6);
+    row-gap: var(--space-4);
+    align-items: center;
+    padding: var(--space-5) var(--space-4);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .rosca {
+    grid-area: rosca;
+    position: relative;
+    /* Escala com o zoom de fonte, como o número que mora dentro dela. */
+    inline-size: min(100%, 15rem);
+    aspect-ratio: 1;
+  }
+
+  .svg {
+    display: block;
+    inline-size: 100%;
+    block-size: 100%;
+  }
+
+  /* O traço em cor de SUPERFÍCIE é o gap de 2 px entre fatias — não é borda:
+     nunca --border, nunca --ink. `vector-effect: non-scaling-stroke` (no
+     atributo) o mantém em 2 px em qualquer tamanho do anel. */
+  .fatia {
+    stroke: var(--surface);
+    stroke-width: 2;
+    stroke-linejoin: miter;
+    transition: opacity var(--motion-fast) var(--ease);
+
+    &[data-fill="1"] {
+      fill: var(--chart-1);
+    }
+
+    &[data-fill="2"] {
+      fill: var(--chart-2);
+    }
+
+    &[data-fill="3"] {
+      fill: var(--chart-3);
+    }
+
+    &[data-fill="4"] {
+      fill: var(--chart-4);
+    }
+
+    &[data-fill="pendente"] {
+      fill: var(--chart-pending);
+    }
+  }
+
+  /* Anel do carregamento (e da ausência de fatia): a cor-base do Skeleton, sem
+     o brilho — SVG não recebe o background-image daquele componente. */
+  .anelVazio {
+    fill: var(--surface-sunken);
+  }
+
+  /* Período 6, linha 1, 45°: ~17 % de cobertura, uma textura leve e estática.
+     Serve o anel e a amostra de 12 px. */
+  .hachura {
+    stroke: var(--ink-muted);
+    stroke-width: 1;
+  }
+
+  /* O único feedback, e é o que anuncia que o <title> vem. Com ΔL ≥ 0,16 entre
+     os passos da rampa, a fatia clareada não alcança a vizinha. */
+  @media (hover: hover) {
+    .fatia:hover {
+      opacity: 0.82;
+    }
+  }
+
+  .centro {
+    position: absolute;
+    inset: 0;
+    /* 20 % de cada lado deixa os 144 px úteis do furo. */
+    padding: 20%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 2px;
+  }
+
+  .centroRotulo {
+    font: 400 var(--text-13) / 1.2 var(--font-ui);
+    color: var(--ink-muted);
+  }
+
+  .legenda {
+    grid-area: legenda;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    & li {
+      display: grid;
+      grid-template-columns: var(--space-3) minmax(0, 1fr) auto;
+      column-gap: var(--space-2);
+      align-items: center;
+    }
+  }
+
+  .nome {
+    font-size: var(--text-15);
+    color: var(--ink);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .parte {
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+  }
+
+  .figcaption {
+    grid-area: figcaption;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fatia {
+      transition: none;
+    }
+  }
+
+  /* No celular a figura empilha; o anel continua à esquerda. */
+  @media (max-width: 40rem) {
+    .figura {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "rosca"
+        "legenda"
+        "figcaption";
+      padding: var(--space-4) var(--space-3);
+    }
+  }
+
+  /* No modo de alto contraste do sistema o anel vira desenho de CONTORNO, com
+     as divisões visíveis e três níveis: sólido (a maior), vazio e hachurado
+     (Outras). A identidade passa a ser ordem + legenda + tabela — que é a
+     fonte de qualquer forma. */
+  @media (forced-colors: active) {
+    .svg {
+      forced-color-adjust: none;
+    }
+
+    /* `[data-fill]` no seletor não é enfeite: ele iguala a especificidade das
+       regras da rampa acima (que são `.fatia[data-fill="n"]`), e aí a ordem no
+       arquivo decide — este bloco vem depois e vence. Sem isso, a fatia 2
+       continuaria saindo em `--chart-2` no alto contraste. */
+    .anelVazio,
+    .fatia[data-fill] {
+      fill: Canvas;
+      stroke: CanvasText;
+      stroke-width: 1;
+      opacity: 1;
+    }
+
+    .fatia[data-fill="1"] {
+      fill: CanvasText;
+    }
+
+    .hachura {
+      stroke: CanvasText;
+    }
+  }
+}

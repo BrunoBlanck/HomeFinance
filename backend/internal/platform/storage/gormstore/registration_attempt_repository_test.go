@@ -2,6 +2,7 @@ package gormstore_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -35,14 +36,33 @@ func (s *store) makeAttempt(t *testing.T, ctx context.Context, email, token stri
 	return att
 }
 
-// tokenDeTeste devolve um token bem formado e determinístico.
-func tokenDeTeste(sufixo byte) string {
-	b := make([]byte, 64)
-	for i := range b {
-		b[i] = '0'
+// tokenDeTeste devolve um token bem formado, determinístico DENTRO do teste e
+// único ENTRE testes.
+//
+// As duas propriedades são necessárias, e por muito pouco tempo elas não
+// conviveram: o token precisa ser estável dentro do teste (é ele que separa
+// "achou pelo token certo" de "achou pelo token errado") e precisa ser
+// diferente em cada `store`, porque `ux_reg_attempts_token` é único no BANCO.
+//
+// Em SQLite isso não aparecia: cada teste abre um arquivo novo. Em PostgreSQL,
+// que é um banco COMPARTILHADO entre os testes da suíte, nove testes usando
+// `s.tokenDeTeste('a')` gravam o mesmo hash e o segundo bate no índice único —
+// falha que parece defeito do repositório e é, na verdade, falta de isolamento
+// do teste. O `tablesSuffix` do store (nanossegundos + contador) é o mesmo
+// mecanismo já usado em `nextID`.
+func (s *store) tokenDeTeste(sufixo byte) string {
+	// O token tem 64 caracteres por contrato; o sufixo do store entra no
+	// começo e o byte distintivo continua no fim.
+	b := []byte(fmt.Sprintf("%-63s", "t"+s.tablesSuffix+string(sufixo)))
+	if len(b) > 63 {
+		b = b[:63]
 	}
-	b[63] = sufixo
-	return string(b)
+	for i := range b {
+		if b[i] == ' ' {
+			b[i] = '0'
+		}
+	}
+	return string(b) + string(sufixo)
 }
 
 // O ESCOPO é a defesa: o código só é encontrado com o token da própria
@@ -54,8 +74,8 @@ func TestRegistrationAttemptEscopoPorToken(t *testing.T) {
 		ctx := t.Context()
 		email := s.nextEmail()
 
-		tokenA := tokenDeTeste('a')
-		tokenB := tokenDeTeste('b')
+		tokenA := s.tokenDeTeste('a')
+		tokenB := s.tokenDeTeste('b')
 		a := s.makeAttempt(t, ctx, email, tokenA, true)
 		b := s.makeAttempt(t, ctx, email, tokenB, true)
 
@@ -69,7 +89,7 @@ func TestRegistrationAttemptEscopoPorToken(t *testing.T) {
 		assert.NotEqual(t, achadaA.ID, achadaB.ID)
 
 		// Token que não existe: nada.
-		_, err = s.attempts.LiveByToken(ctx, email, auth.HashRegistrationToken(tokenDeTeste('c')), now())
+		_, err = s.attempts.LiveByToken(ctx, email, auth.HashRegistrationToken(s.tokenDeTeste('c')), now())
 		assert.ErrorIs(t, err, auth.ErrNotFound)
 
 		// Token certo, e-mail de outra pessoa: nada.
@@ -91,7 +111,7 @@ func TestRegistrationAttemptSemEnvioNaoEhValidavel(t *testing.T) {
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
 		email := s.nextEmail()
-		token := tokenDeTeste('a')
+		token := s.tokenDeTeste('a')
 
 		att := s.makeAttempt(t, ctx, email, token, false)
 		require.Nil(t, att.CodeIssuedAt)
@@ -143,7 +163,7 @@ func TestRegistrationAttemptCodigoNuncaEmitidoEhNuloNaColuna(t *testing.T) {
 		// Sufixo próprio: o índice ux_reg_attempts_token é GLOBAL, e num
 		// Postgres compartilhado dois testes paralelos com o mesmo token
 		// colidiriam.
-		token := tokenDeTeste('n')
+		token := s.tokenDeTeste('n')
 		att := s.makeAttempt(t, ctx, email, token, false)
 
 		var nulas int64
@@ -182,7 +202,7 @@ func TestRegistrationAttemptConsumoEhUnico(t *testing.T) {
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
 		email := s.nextEmail()
-		token := tokenDeTeste('a')
+		token := s.tokenDeTeste('a')
 		att := s.makeAttempt(t, ctx, email, token, true)
 
 		ok, err := s.attempts.Consume(ctx, att.ID, now())
@@ -209,7 +229,7 @@ func TestRegistrationAttemptExpiradaNaoEhViva(t *testing.T) {
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
 		email := s.nextEmail()
-		token := tokenDeTeste('a')
+		token := s.tokenDeTeste('a')
 		s.makeAttempt(t, ctx, email, token, true)
 
 		_, err := s.attempts.LiveByToken(ctx, email, auth.HashRegistrationToken(token), now().Add(16*time.Minute))
@@ -224,7 +244,7 @@ func TestRegistrationAttemptIncrementaTentativasAtomicamente(t *testing.T) {
 
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
-		att := s.makeAttempt(t, ctx, s.nextEmail(), tokenDeTeste('a'), true)
+		att := s.makeAttempt(t, ctx, s.nextEmail(), s.tokenDeTeste('a'), true)
 
 		for esperado := 1; esperado <= 3; esperado++ {
 			n, ok, err := s.attempts.IncrementAttempts(ctx, att.ID)
@@ -251,7 +271,7 @@ func TestRegistrationAttemptRotateCodeZeraOContadorEMantemOToken(t *testing.T) {
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
 		email := s.nextEmail()
-		token := tokenDeTeste('a')
+		token := s.tokenDeTeste('a')
 		att := s.makeAttempt(t, ctx, email, token, true)
 
 		for range 3 {
@@ -290,7 +310,7 @@ func TestRegistrationAttemptLiveByEmailELastCodeIssuedAt(t *testing.T) {
 		// emissão (não empurra o cooldown de quem nunca recebeu mensagem) e
 		// NÃO conta como viva (BAIXA-1: não é validável por ninguém, e
 		// contá-la desligava a reemissão do login não verificado para o dono).
-		s.makeAttempt(t, ctx, email, tokenDeTeste('a'), false)
+		s.makeAttempt(t, ctx, email, s.tokenDeTeste('a'), false)
 		_, ok, err = s.attempts.LastCodeIssuedAt(ctx, email)
 		require.NoError(t, err)
 		assert.False(t, ok, "tentativa sem envio não conta como emissão")
@@ -299,7 +319,7 @@ func TestRegistrationAttemptLiveByEmailELastCodeIssuedAt(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, vivas, "tentativa sem código emitido não é utilizável e não conta como viva")
 
-		s.makeAttempt(t, ctx, email, tokenDeTeste('b'), true)
+		s.makeAttempt(t, ctx, email, s.tokenDeTeste('b'), true)
 		quando, ok, err := s.attempts.LastCodeIssuedAt(ctx, email)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -310,7 +330,7 @@ func TestRegistrationAttemptLiveByEmailELastCodeIssuedAt(t *testing.T) {
 		assert.Len(t, vivas, 1, "só a tentativa com código emitido conta")
 
 		// Endereço realmente disputado: DUAS emitidas.
-		s.makeAttempt(t, ctx, email, tokenDeTeste('c'), true)
+		s.makeAttempt(t, ctx, email, s.tokenDeTeste('c'), true)
 		vivas, err = s.attempts.LiveByEmail(ctx, email, now(), 2)
 		require.NoError(t, err)
 		assert.Len(t, vivas, 2, "endereço disputado tem mais de uma tentativa viva")
@@ -332,9 +352,9 @@ func TestRegistrationAttemptConsumeAllForEmail(t *testing.T) {
 		email := s.nextEmail()
 		outro := s.nextEmail()
 
-		s.makeAttempt(t, ctx, email, tokenDeTeste('a'), true)
-		s.makeAttempt(t, ctx, email, tokenDeTeste('b'), true)
-		s.makeAttempt(t, ctx, outro, tokenDeTeste('c'), true)
+		s.makeAttempt(t, ctx, email, s.tokenDeTeste('a'), true)
+		s.makeAttempt(t, ctx, email, s.tokenDeTeste('b'), true)
+		s.makeAttempt(t, ctx, outro, s.tokenDeTeste('c'), true)
 
 		n, err := s.attempts.ConsumeAllForEmail(ctx, email, now())
 		require.NoError(t, err)
@@ -357,16 +377,31 @@ func TestRegistrationAttemptDeleteExpired(t *testing.T) {
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
 		email := s.nextEmail()
-		s.makeAttempt(t, ctx, email, tokenDeTeste('a'), true)
+		token := s.tokenDeTeste('a')
+		s.makeAttempt(t, ctx, email, token, true)
 
-		// Antes do corte: nada sai.
-		n, err := s.attempts.DeleteExpired(ctx, now())
+		// ⚠️ DeleteExpired é varredura de manutenção: o contador é GLOBAL. Em
+		// SQLite (banco por teste) o número exato vale; num PostgreSQL
+		// compartilhado pela suíte ele inclui o que os vizinhos deixaram. A
+		// asserção que vale nos dois é sobre ESTA tentativa.
+		//
+		// Antes do corte: a nossa continua lá.
+		_, err := s.attempts.DeleteExpired(ctx, now())
 		require.NoError(t, err)
-		assert.Zero(t, n)
+		_, err = s.attempts.ByToken(ctx, email, auth.HashRegistrationToken(token))
+		require.NoError(t, err, "tentativa ainda válida não pode ser varrida")
 
-		n, err = s.attempts.DeleteExpired(ctx, now().Add(time.Hour))
+		n, err := s.attempts.DeleteExpired(ctx, now().Add(time.Hour))
 		require.NoError(t, err)
-		assert.EqualValues(t, 1, n)
+		if s.backendIsPG {
+			assert.GreaterOrEqual(t, n, int64(1))
+		} else {
+			assert.EqualValues(t, 1, n)
+		}
+
+		_, err = s.attempts.ByToken(ctx, email, auth.HashRegistrationToken(token))
+		assert.ErrorIs(t, err, auth.ErrNotFound, "passada a expiração, a tentativa some")
+
 	})
 }
 
@@ -377,7 +412,7 @@ func TestRegistrationAttemptTokenEhUnico(t *testing.T) {
 
 	eachBackend(t, func(t *testing.T, s *store) {
 		ctx := t.Context()
-		token := tokenDeTeste('a')
+		token := s.tokenDeTeste('a')
 		s.makeAttempt(t, ctx, s.nextEmail(), token, true)
 
 		emitido := now()

@@ -1,7 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import { firstName, formatCentavos, formatCountdown, formatFullDate } from './format'
+import {
+  firstName,
+  formatarParticipacao,
+  formatCentavos,
+  formatCountdown,
+  formatFullDate,
+} from './format'
 
 describe('format', () => {
+  it('formata pontos-base como percentual, com as casas pedidas', () => {
+    // Duas casas: a tabela. `4123` bp são 41,23 % exatos — nenhum arredondamento.
+    expect(formatarParticipacao(4123, 2)).toBe('41,23%')
+    expect(formatarParticipacao(10000, 2)).toBe('100,00%')
+    expect(formatarParticipacao(0, 2)).toBe('0,00%')
+    expect(formatarParticipacao(1, 2)).toBe('0,01%')
+    // Uma casa: legenda e <title> da rosca.
+    expect(formatarParticipacao(4123, 1)).toBe('41,2%')
+    expect(formatarParticipacao(590, 1)).toBe('5,9%')
+    expect(formatarParticipacao(10000, 1)).toBe('100,0%')
+  })
+
+  // Bordas do percentual (QA E6a): os dois extremos que a rosca produz de
+  // verdade. `9999` é o mês em que uma única categoria ficou com tudo menos um
+  // ponto-base — com duas casas ele NÃO pode virar `100,00%`, senão a tabela
+  // some com a diferença; e com UMA casa ele arredonda para `100,0%`, que é o
+  // preço combinado da legenda (docs/DESIGN.md E6a (a) 6) e por isso está aqui
+  // por escrito, e não por acidente.
+  it('99,99% não vira 100% na tabela, e 0,01% não vira zero', () => {
+    expect(formatarParticipacao(9999, 2)).toBe('99,99%')
+    expect(formatarParticipacao(9999, 1)).toBe('100,0%')
+    expect(formatarParticipacao(1, 1)).toBe('0,0%')
+    expect(formatarParticipacao(1, 2)).toBe('0,01%')
+    // E a soma das duas fecha a tabela em 100,00%.
+    expect(formatarParticipacao(9999 + 1, 2)).toBe('100,00%')
+  })
+
   it('formata centavos como moeda brasileira', () => {
     //   é o espaço não separável que o Intl coloca depois de R$.
     expect(formatCentavos(129900)).toBe('R$ 1.299,00')

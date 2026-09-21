@@ -4,7 +4,15 @@ import styles from './Panel.module.css'
 type PanelProps = {
   as?: 'section' | 'article' | 'div' | undefined
   title?: string | undefined
-  /** Id externo do título, quando outro elemento já o rotula. */
+  /** Id do título, quando ele NÃO é o `title` deste componente.
+   *
+   *  Duas leituras, e as duas valem: com `title`, ele apenas fixa o id do `<h2>`
+   *  gerado; **sem** `title`, ele aponta para um cabeçalho que o próprio
+   *  conteúdo renderiza, e é assim que uma `<section>` de `padding="none"`
+   *  ganha nome acessível. Esse caso existe porque `padding="none"` zera
+   *  `--panel-pad` — o cabeçalho do `Panel` ficaria colado na borda —, e é o que
+   *  a tela `/ia` precisa: o `<h2>` numerado mora no conteúdo, com o recuo
+   *  dele, e a `<section>` continua sendo uma região com nome. */
   titleId?: string | undefined
   subtitle?: string | undefined
   actions?: ReactNode | undefined
@@ -36,7 +44,7 @@ export function Panel({
       className={styles.panel}
       data-tone={tone}
       data-padding={padding}
-      aria-labelledby={as === 'section' && title ? headingId : undefined}
+      aria-labelledby={as === 'section' && (title || titleId) ? headingId : undefined}
     >
       {title || actions ? (
         <div className={styles.head}>

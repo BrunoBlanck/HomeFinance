@@ -1,0 +1,227 @@
+@layer components {
+  .pagina {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    max-inline-size: 62rem;
+  }
+
+  .cabecalho {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-28);
+    font-weight: 600;
+    color: var(--ink);
+
+    /* O foco entra aqui na troca de rota; o anel só aparece para quem navega
+       por teclado, nunca no clique. */
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .apoio {
+    margin-block-start: var(--space-1);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  /* Ações do cabeçalho, à direita do título — a mesma posição de
+     "Importar extrato" em /lancamentos. */
+  .acoesDoTopo {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* Os dois botões do estado vazio: o primário traz dados novos, o quieto
+     conserta os que já estão gravados. */
+  .acoesDoVazio {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* Faixa de filtro: recuada, para ler como barra de ferramentas da tabela e
+     não como mais uma linha de dado. A mesma de /lancamentos. */
+  .faixa {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    background-color: var(--surface-sunken);
+    border-block-end: 1px solid var(--border);
+  }
+
+  /* "Conta … e outra conta …": os dois seletores e a conjunção entre eles
+     alinhados pela base dos controles. */
+  .filtros {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .conjuncao {
+    padding-block-end: calc((var(--control-h-sm) - 1lh) / 2);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Saldo da conta única: rótulo em apoio e o número em posição — o único
+     valor semântico da tela. */
+  .saldo {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    padding-block-end: calc((var(--control-h-sm) - 1lh) / 2);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Cada tabela do painel ganha um nome visível: com pares e itens empilhados,
+     o cabeçalho de coluna sozinho não diz qual é qual. Mesmo estilo dos
+     títulos das <dl> do painel do par — um só dispositivo. */
+  .secao + .secao {
+    border-block-start: 1px solid var(--border);
+  }
+
+  .tituloDaSecao {
+    padding: var(--space-3) var(--space-4) 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+
+  /* "Nubank → C6": nome, seta e nome numa linha só, alinhados pelo meio. */
+  .setaEntreContas {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+
+    /* A seta não encolhe: numa coluna de largura mínima, o flex espremeria o
+       SVG a zero na linha mais longa — e a direção do dinheiro sumiria
+       justamente onde os nomes são maiores. */
+    & > svg {
+      flex: none;
+    }
+  }
+
+  .contas {
+    display: inline-flex;
+    color: var(--ink);
+  }
+
+  .contagemDoPar {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .registro {
+    color: var(--ink-muted);
+  }
+
+  .descricao {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink);
+  }
+
+  /* A célula da descrição é a única que absorve largura. Numa tabela de
+     layout automático, `max-inline-size: 0` é o que faz a coluna receber SÓ o
+     espaço que sobra das outras — sem isso, uma descrição longa empurra Valor
+     e Registro para fora do painel, e a reticência nunca acontece. */
+  .pagina td:has(> .descricao) {
+    max-inline-size: 0;
+  }
+
+  .semDescricao {
+    color: var(--ink-muted);
+  }
+
+  /* Segunda linha de uma célula: existe só onde o DataTable escondeu colunas
+     (abaixo de 40rem) — Contas e Registro na lista, Enviado/Recebido/contagem
+     nos pares. Esconder coluna só é honesto quando o conteúdo reaparece. */
+  .secundaria {
+    display: none;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1);
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    white-space: normal;
+  }
+
+  .separador {
+    color: var(--border-strong);
+  }
+
+  /* Rodapé de paginação. Mora no Panel, fora da <table>: ele fala da CONSULTA
+     ("50 de 214"), não dos dados. */
+  .rodape {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    border-block-start: 1px solid var(--border);
+  }
+
+  .contagem {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 40rem) {
+    .secundaria {
+      display: flex;
+    }
+
+    /* No toque não existe hover para ler o `title`: a descrição ganha duas
+       linhas antes do corte. */
+    .descricao {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .faixa {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .filtros {
+      align-items: stretch;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .conjuncao,
+    .saldo {
+      padding-block-end: 0;
+    }
+  }
+}

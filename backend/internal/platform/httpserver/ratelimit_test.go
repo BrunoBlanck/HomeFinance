@@ -203,3 +203,63 @@ func TestLimiterAindaVarreComPisoDeTTL(t *testing.T) {
 	lim.Allow("ip-novo")
 	assert.Equal(t, 1, lim.Len(), "chaves ociosas além do TTL efetivo precisam sair do mapa")
 }
+
+// WithBurst separa ESTOURO de COTA (achado A2 da revisão de segurança): a
+// rota cara continua com 60/h, mas não pode gastar os 60 de uma vez — é o que
+// impede uma casa de ocupar o pool de conexões inteiro com execuções
+// simultâneas sem passar do teto horário.
+func TestLimiterComBurstMenorQueACotaEnfileiraARajadaSemMudarACota(t *testing.T) {
+	t.Parallel()
+
+	c := &relogio{now: time.Unix(1_700_000_000, 0)}
+	lim := httpserver.NewLimiter(60, time.Hour, time.Hour).WithBurst(3).WithClock(c.agora)
+
+	// Estouro: três de uma vez, e a quarta espera.
+	for i := range 3 {
+		ok, _ := lim.Allow("casa-1")
+		assert.True(t, ok, "requisição %d deveria passar", i+1)
+	}
+	ok, retry := lim.Allow("casa-1")
+	assert.False(t, ok, "a quarta simultânea é 429")
+	assert.Positive(t, retry)
+
+	// A COTA não mudou: a reposição é de 60 por hora, ou seja, um por minuto.
+	c.avanca(time.Minute)
+	ok, _ = lim.Allow("casa-1")
+	assert.True(t, ok, "um token por minuto continua sendo 60/h")
+
+	// Outra casa tem balde próprio, com o mesmo estouro.
+	for i := range 3 {
+		ok, _ := lim.Allow("casa-2")
+		assert.True(t, ok, "casa-2, requisição %d", i+1)
+	}
+	ok, _ = lim.Allow("casa-2")
+	assert.False(t, ok)
+
+	// Em uma hora, a casa que ficou parada repõe só até o ESTOURO — nunca as
+	// 60 de uma vez.
+	c.avanca(time.Hour)
+	for i := range 3 {
+		ok, _ := lim.Allow("casa-2")
+		assert.True(t, ok, "reposição, requisição %d", i+1)
+	}
+	ok, _ = lim.Allow("casa-2")
+	assert.False(t, ok, "o balde cheio é o estouro, não a cota inteira")
+}
+
+// Estouro inválido cai no piso de 1, e o limitador nulo continua permitindo.
+func TestWithBurstRecusaValorInvalidoESuportaNulo(t *testing.T) {
+	t.Parallel()
+
+	c := &relogio{now: time.Unix(1_700_000_000, 0)}
+	lim := httpserver.NewLimiter(60, time.Hour, time.Hour).WithBurst(0).WithClock(c.agora)
+	ok, _ := lim.Allow("casa-1")
+	assert.True(t, ok)
+	ok, _ = lim.Allow("casa-1")
+	assert.False(t, ok, "estouro abaixo de 1 vira 1")
+
+	var nulo *httpserver.Limiter
+	assert.Nil(t, nulo.WithBurst(3))
+	ok, _ = nulo.WithBurst(3).Allow("casa-1")
+	assert.True(t, ok)
+}

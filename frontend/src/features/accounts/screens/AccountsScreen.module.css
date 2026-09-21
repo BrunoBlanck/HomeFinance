@@ -1,0 +1,104 @@
+@layer components {
+  .pagina {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    max-inline-size: 62rem;
+  }
+
+  .cabecalho {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-28);
+    font-weight: 600;
+    color: var(--ink);
+
+    /* O foco entra aqui na troca de rota; o anel só aparece para quem navega
+       por teclado, nunca no clique. */
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .apoio {
+    margin-block-start: var(--space-1);
+    font-size: var(--text-15);
+    color: var(--ink-muted);
+  }
+
+  .aviso {
+    /* Fica na tela até a pessoa resolver: é um caminho alternativo, não uma
+       notificação que pode passar batida. */
+    max-inline-size: 62rem;
+  }
+
+  .filtros {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-3) var(--space-4);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .alternador {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    cursor: pointer;
+
+    & input {
+      inline-size: 1rem;
+      block-size: 1rem;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+  }
+
+  .nome {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+  }
+
+  .nomeLinha {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-inline-size: 0;
+  }
+
+  /* Instituição e dias da fatura. Texto de apoio, no tom secundário: é contexto
+     para reconhecer a conta, não um estado que peça marcação. */
+  .detalhe {
+    font-size: var(--text-13);
+    line-height: 1.3;
+    color: var(--ink-muted);
+  }
+
+  .nomeTexto {
+    font-weight: 600;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .acoes {
+    display: flex;
+    gap: var(--space-1);
+    justify-content: flex-end;
+  }
+}

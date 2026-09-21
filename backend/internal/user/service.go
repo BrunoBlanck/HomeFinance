@@ -34,6 +34,11 @@ type HouseholdView struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Role string `json:"role"`
+	// O fuso é o que o cliente usa para saber em que MÊS ele está (ADR-019);
+	// a moeda é BRL fixa no v1, e existe para a formatação não ter símbolo
+	// escrito na mão em nenhuma tela.
+	Timezone string `json:"timezone"`
+	Currency string `json:"currency"`
 }
 
 // UserView é o usuário como aparece no corpo de /me. É um DTO próprio: a
@@ -82,7 +87,7 @@ func (s *Service) Me(ctx context.Context, ident session.Identity) (*MeView, erro
 
 	views := make([]HouseholdView, 0, len(all))
 	for _, h := range all {
-		views = append(views, HouseholdView{ID: h.ID, Name: h.Name, Role: h.Role})
+		views = append(views, HouseholdView{ID: h.ID, Name: h.Name, Role: h.Role, Timezone: h.Timezone, Currency: h.Currency})
 	}
 
 	return &MeView{
@@ -93,7 +98,7 @@ func (s *Service) Me(ctx context.Context, ident session.Identity) (*MeView, erro
 			EmailVerifiedAt: formatTimePtr(u.EmailVerifiedAt),
 			CreatedAt:       formatTime(u.CreatedAt),
 		},
-		Household:  HouseholdView{ID: active.ID, Name: active.Name, Role: active.Role},
+		Household:  HouseholdView{ID: active.ID, Name: active.Name, Role: active.Role, Timezone: active.Timezone, Currency: active.Currency},
 		Households: views,
 	}, nil
 }

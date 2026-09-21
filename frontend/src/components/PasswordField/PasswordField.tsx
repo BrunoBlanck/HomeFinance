@@ -9,10 +9,36 @@ import styles from './PasswordField.module.css'
 
 const MIN_LENGTH = 12
 
+/** O `autocomplete` do campo. São dois casos que **não são o mesmo**, e trocar
+ *  um pelo outro tem consequência real — por isso o tipo não aceita nada além
+ *  destes três valores.
+ *
+ *  **`current-password` / `new-password` — credencial de sessão.** É a senha da
+ *  conta: a pessoa precisa lembrar dela e digitá-la de novo. Aqui esconder o
+ *  campo do gerenciador de senhas é um tiro no pé — empurra o usuário para uma
+ *  senha pior, que ele consiga decorar. É o default moral deste componente.
+ *
+ *  **`off` — segredo de uso único, que não é credencial de ninguém.** Hoje, só
+ *  a senha do arquivo da importação (o CPF do titular do cartão): digitada uma
+ *  vez, mandada como `[]byte` e zerada em segundos. Com `current-password`, o
+ *  Chrome, o Firefox e o Safari ofereceriam **salvar esse dado de terceiro para
+ *  a origem do HomeFinance** e sincronizá-lo para o cofre do sistema ou da
+ *  conta Google — fora de qualquer ciclo de vida que a aplicação controle, e
+ *  anulando todo o cuidado do resto do caminho. Pior: como o login usa
+ *  `current-password` na **mesma origem**, o navegador trata os dois campos
+ *  como a mesma credencial e chega a oferecer a troca de uma senha pela outra,
+ *  preenchendo o CPF no login depois.
+ *
+ *  **A regra, em uma frase:** `off` **só** em segredo efêmero de arquivo. Se o
+ *  campo é uma senha do HomeFinance, é `current-password` ou `new-password` —
+ *  sem exceção. Contrato: `backend/api/openapi.yaml`, campo `password` de
+ *  `POST /imports`. */
+type PasswordAutoComplete = 'current-password' | 'new-password' | 'off'
+
 type PasswordFieldProps = Omit<TextFieldProps, 'type' | 'autoComplete'> & {
-  /** O tipo impede `autoComplete="off"`: esconder o campo do gerenciador de
-   *  senhas empurra o usuário para senhas piores. */
-  autoComplete: 'current-password' | 'new-password'
+  /** Obrigatório e restrito — ver `PasswordAutoComplete`. `off` é exclusivo de
+   *  segredo de uso único (senha de arquivo), nunca de senha de conta. */
+  autoComplete: PasswordAutoComplete
   toggleable?: boolean | undefined
   showRequirement?: boolean | undefined
 }
