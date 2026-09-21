@@ -78,6 +78,14 @@ type repoFake struct {
 	// chamada de Summary recebeu: é com ele que o teste prova que o serviço
 	// passou (ou não) o filtro.
 	resumosPedidos [][]string
+	// categoriasNaLista e categoriasNoResumo guardam o conjunto de
+	// CategoryIDs que chegou a cada consulta. É por eles que o teste do
+	// filtro por categoria prova as duas metades: que o grupo desce expandido
+	// nas filhas, e que o RESUMO recebe o mesmo conjunto da lista — um resumo
+	// do mês inteiro embaixo de uma lista de uma categoria seria o número
+	// errado sob o rótulo certo.
+	categoriasNaLista  [][]string
+	categoriasNoResumo [][]string
 	// listagens conta as chamadas de List. É o par de resumosPedidos nos
 	// testes de falha fechada: sem ele, "nada foi consultado" provaria só que
 	// o RESUMO não foi pedido, e a página teria saído do mesmo jeito.
@@ -160,11 +168,66 @@ func (r *repoFake) ByID(_ context.Context, householdID, id string) (*transaction
 	return &copia, nil
 }
 
+// noGrupoDeTipo reproduz o predicado de aplicarGrupoDeTipo do repositório
+// real (spec 0004 §12, emenda E2d), inclusive a parte que um dublê ingênuo
+// erraria: `income`/`expense` EXCLUEM o que está marcado, mas o lançamento SEM
+// categoria continua dentro. É a tradução em Go do `category_id IS NULL OR
+// category_id NOT IN (…)` — sem o `IS NULL OR`, o SQL devolveria NULL (não
+// verdadeiro) e a despesa sem categoria sumiria da aba "Despesas".
+// naCategoria é o `category_id IN (…)` do recorte por categoria. Linha SEM
+// categoria nunca casa — o que inclui as duas pernas de transferência, que não
+// têm categoria por desenho (ADR-016).
+func naCategoria(t transaction.Transaction, categorias map[string]struct{}) bool {
+	if t.CategoryID == nil {
+		return false
+	}
+	_, ok := categorias[*t.CategoryID]
+	return ok
+}
+
+func noGrupoDeTipo(t transaction.Transaction, grupo string, marcadas map[string]struct{}) bool {
+	marcada := t.CategoryID != nil && func() bool {
+		_, ok := marcadas[*t.CategoryID]
+		return ok
+	}()
+	switch grupo {
+	case transaction.KindGroupIncome:
+		return t.Kind == transaction.KindIncome && !marcada
+	case transaction.KindGroupExpense:
+		return t.Kind == transaction.KindExpense && !marcada
+	case transaction.KindGroupTransfer:
+		return t.IsTransfer()
+	case transaction.KindGroupInvestment:
+		return (t.Kind == transaction.KindIncome || t.Kind == transaction.KindExpense) && marcada
+	default:
+		return true
+	}
+}
+
 func (r *repoFake) List(_ context.Context, householdID string, f transaction.ListFilter) ([]transaction.Transaction, error) {
 	r.listagens++
 	if r.erroList != nil {
 		return nil, r.erroList
 	}
+	// As MESMAS duas recusas do repositório real, na mesma ordem: grupo fora
+	// da allowlist e `investment` com conjunto vazio falham FECHADO, nunca
+	// viram "sem filtro". É o que dá sentido ao teste do curto-circuito — sem
+	// elas aqui, a lista sairia vazia de qualquer jeito e o teste não provaria
+	// nada.
+	if !transaction.ValidKindGroup(f.KindGroup) {
+		return nil, transaction.ErrUnknownKindGroup
+	}
+	marcadas := conjunto(f.InvestmentCategoryIDs)
+	if f.KindGroup == transaction.KindGroupInvestment && len(marcadas) == 0 {
+		return nil, transaction.ErrEmptyCategoryFilter
+	}
+	// O recorte por categoria, como no repositório real: predicado sobre
+	// `category_id`, e vazio é "sem filtro". Gravado também, para o teste
+	// poder afirmar QUE conjunto desceu — a expansão do grupo em filhas é do
+	// serviço, e é aqui que ela se prova.
+	r.categoriasNaLista = append(r.categoriasNaLista, append([]string(nil), f.CategoryIDs...))
+	categorias := conjunto(f.CategoryIDs)
+
 	var out []transaction.Transaction
 	for _, id := range r.ordem {
 		t := r.linhas[id]
@@ -178,6 +241,12 @@ func (r *repoFake) List(_ context.Context, householdID string, f transaction.Lis
 			continue
 		}
 		if f.StatementID != "" && (t.StatementID == nil || *t.StatementID != f.StatementID) {
+			continue
+		}
+		if f.KindGroup != "" && !noGrupoDeTipo(t, f.KindGroup, marcadas) {
+			continue
+		}
+		if len(categorias) > 0 && !naCategoria(t, categorias) {
 			continue
 		}
 		out = append(out, t)
@@ -225,15 +294,38 @@ func (r *repoFake) List(_ context.Context, householdID string, f transaction.Lis
 // de um banco adulterado de verdade.
 func (r *repoFake) Summary(_ context.Context, householdID string, f transaction.SummaryFilter) (transaction.Summary, error) {
 	r.resumosPedidos = append(r.resumosPedidos, append([]string(nil), f.InvestmentCategoryIDs...))
+	r.categoriasNoResumo = append(r.categoriasNoResumo, append([]string(nil), f.CategoryIDs...))
 	if r.resumoForcado != nil {
 		return *r.resumoForcado, nil
 	}
 	if len(f.InvestmentCategoryIDs) > 200 {
 		return transaction.Summary{}, transaction.ErrTooManyCategories
 	}
+	// O grupo NÃO entra no WHERE deste resumo — é o desenho da emenda E2d —,
+	// mas é conferido antes dele, como no repositório real, e `investment`
+	// com conjunto vazio falha fechado pelo mesmo motivo de List.
+	if !transaction.ValidKindGroup(f.KindGroup) {
+		return transaction.Summary{}, transaction.ErrUnknownKindGroup
+	}
 	marcadas := conjunto(f.InvestmentCategoryIDs)
+	if f.KindGroup == transaction.KindGroupInvestment && len(marcadas) == 0 {
+		return transaction.Summary{}, transaction.ErrEmptyCategoryFilter
+	}
+	categoriasDoResumo := conjunto(f.CategoryIDs)
 
 	var out transaction.Summary
+	// porKind é a projeção CRUA por kind — as mesmas cinco colunas que a
+	// consulta real agrega. Uncategorized vem crua de propósito: nas pernas de
+	// transferência ela é igual a Count, porque transferência nunca tem
+	// categoria e toda perna casa com `category_id IS NULL`. É a armadilha que
+	// o serviço tem de evitar somando só income e expense.
+	porKind := map[string]*transaction.SummaryKindTotals{}
+	linhaDe := func(kind string) *transaction.SummaryKindTotals {
+		if _, ok := porKind[kind]; !ok {
+			porKind[kind] = &transaction.SummaryKindTotals{Kind: kind}
+		}
+		return porKind[kind]
+	}
 	marcada := func(t transaction.Transaction) bool {
 		if t.CategoryID == nil {
 			return false
@@ -251,7 +343,24 @@ func (r *repoFake) Summary(_ context.Context, householdID string, f transaction.
 		if f.AccountID != "" && t.AccountID != f.AccountID {
 			continue
 		}
+		// O recorte por categoria ENTRA no WHERE do resumo, ao contrário do
+		// KindGroup: ele é janela, e o resumo fala da mesma janela da lista.
+		if len(categoriasDoResumo) > 0 && !naCategoria(t, categoriasDoResumo) {
+			continue
+		}
 		out.Count++
+
+		linha := linhaDe(t.Kind)
+		linha.Count++
+		linha.TotalCents += t.AmountCents
+		if t.CategoryID == nil {
+			linha.Uncategorized++
+		}
+		if marcada(t) {
+			linha.MarkedCount++
+			linha.MarkedTotalCents += t.AmountCents
+		}
+
 		switch t.Kind {
 		case transaction.KindIncome:
 			if marcada(t) {
@@ -273,6 +382,15 @@ func (r *repoFake) Summary(_ context.Context, householdID string, f transaction.
 			}
 		}
 	}
+	for _, linha := range porKind {
+		out.ByKind = append(out.ByKind, *linha)
+	}
+	// Ordem estável por kind, como o repositório real faz em Go: a ordem em
+	// que o banco devolve os grupos depende de collation, e nada acima pode
+	// depender dela.
+	slices.SortFunc(out.ByKind, func(a, b transaction.SummaryKindTotals) int {
+		return strings.Compare(a.Kind, b.Kind)
+	})
 	out.NetCents = out.IncomeCents - out.ExpenseCents
 	return out, nil
 }
@@ -830,11 +948,33 @@ func (r *repoFake) SumByStatement(_ context.Context, householdID string, ids []s
 	return out, nil
 }
 
+// colacaoFrouxaCasa imita, num dublê, o casamento que `WHERE id = ?` faz nos
+// dialetos cuja COLLATION não é binária.
+//
+// As colunas de id são `varchar(36)` sem collation declarada, e nada fixa
+// charset na abertura da conexão. Logo o `=` do MySQL 8 usa
+// `utf8mb4_0900_ai_ci`, que IGNORA caixa e acento, e o do MSSQL usa `CI_AS`
+// com padding ANSI, que IGNORA espaço à direita. Em SQLite e PostgreSQL o `=`
+// é sensível aos dois — e é por isso que nenhum teste contra SQLite (nem a
+// suíte cruzada do relatório) poderia flagrar esta classe de defeito, e por
+// isso ela é reproduzida AQUI, num dublê, e não num dialeto.
+//
+// A comparação é sempre `pedido` (o que o cliente mandou) contra `id` (o que
+// está gravado) — nunca o contrário: é o que o banco faz.
+func colacaoFrouxaCasa(pedido, id string) bool {
+	return strings.EqualFold(strings.TrimRight(pedido, " "), id)
+}
+
 // contasFake responde como o repositório de contas: nada sai sem bater a casa.
 type contasFake struct {
 	linhas map[string]account.Account
 	// palavras alimenta o classificador (spec 0005); vazio por padrão.
 	palavras []account.Keyword
+
+	// colacaoFrouxa liga o casamento insensível descrito em
+	// colacaoFrouxaCasa. Desligada por padrão: o dublê continua imitando
+	// SQLite/PostgreSQL, que é onde a suíte roda de verdade.
+	colacaoFrouxa bool
 }
 
 func novasContas() *contasFake { return &contasFake{linhas: map[string]account.Account{}} }
@@ -846,6 +986,14 @@ func (c *contasFake) add(a account.Account) account.Account {
 
 func (c *contasFake) ByID(_ context.Context, householdID, id string) (*account.Account, error) {
 	a, ok := c.linhas[id]
+	if !ok && c.colacaoFrouxa {
+		for _, candidata := range c.linhas {
+			if candidata.HouseholdID == householdID && colacaoFrouxaCasa(id, candidata.ID) {
+				a, ok = candidata, true
+				break
+			}
+		}
+	}
 	if !ok || a.HouseholdID != householdID {
 		return nil, account.ErrNotFound
 	}
@@ -893,6 +1041,8 @@ type categoriasFake struct {
 	// atribuiveisPedidas conta as chamadas de LiveStates — a reconferência
 	// dos achados A4/A9. Uma por EXECUÇÃO real, zero na prévia.
 	atribuiveisPedidas int
+	// colacaoFrouxa liga o casamento insensível de colacaoFrouxaCasa no ByID.
+	colacaoFrouxa bool
 	// ignorarCasa faz List devolver TODAS as categorias, de todas as casas —
 	// uma fonte defeituosa de propósito. Existe para que o teste de
 	// isolamento meça a defesa do SERVIÇO, e não a do dublê: um dublê que
@@ -911,6 +1061,14 @@ func (c *categoriasFake) add(k category.Category) category.Category {
 
 func (c *categoriasFake) ByID(_ context.Context, householdID, id string) (*category.Category, error) {
 	k, ok := c.linhas[id]
+	if !ok && c.colacaoFrouxa {
+		for _, candidata := range c.linhas {
+			if candidata.HouseholdID == householdID && colacaoFrouxaCasa(id, candidata.ID) {
+				k, ok = candidata, true
+				break
+			}
+		}
+	}
 	if !ok || k.HouseholdID != householdID {
 		return nil, category.ErrNotFound
 	}
@@ -1002,6 +1160,8 @@ func (c *categoriasFake) ListKeywords(_ context.Context, householdID string) ([]
 
 type faturasFake struct {
 	linhas map[string]cardstatement.Statement
+	// colacaoFrouxa liga o casamento insensível de colacaoFrouxaCasa no ByID.
+	colacaoFrouxa bool
 }
 
 func novasFaturas() *faturasFake {
@@ -1015,6 +1175,14 @@ func (f *faturasFake) add(s cardstatement.Statement) cardstatement.Statement {
 
 func (f *faturasFake) ByID(_ context.Context, householdID, id string) (*cardstatement.Statement, error) {
 	s, ok := f.linhas[id]
+	if !ok && f.colacaoFrouxa {
+		for _, candidata := range f.linhas {
+			if candidata.HouseholdID == householdID && colacaoFrouxaCasa(id, candidata.ID) {
+				s, ok = candidata, true
+				break
+			}
+		}
+	}
 	if !ok || s.HouseholdID != householdID {
 		return nil, cardstatement.ErrNotFound
 	}

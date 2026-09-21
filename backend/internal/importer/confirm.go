@@ -270,7 +270,13 @@ func (s *Service) confirmar(ctx context.Context, ator Actor, lote *Batch, in Con
 	// resposta precisa distinguir a contraparte (`counterpartAccountId`, que
 	// está no corpo) da conta do lote (`accountId`, que não está). Uma
 	// consulta por conta DISTINTA, sempre pela casa do token.
-	if err := s.conferirContrapartes(ctx, ator.HouseholdID, plano.contrapartes); err != nil {
+	contasCanonicas, err := s.conferirContrapartes(ctx, ator.HouseholdID, plano.contrapartes)
+	if err != nil {
+		return ResultView{}, err
+	}
+	// O que for gravado leva o id CANÔNICO da conta, nunca a string que veio
+	// no corpo (ver conferirContrapartes e canonizarContas).
+	if err := plano.canonizarContas(lote.AccountID, contasCanonicas); err != nil {
 		return ResultView{}, err
 	}
 
@@ -623,7 +629,8 @@ func (p *planoDeEscrita) lembrarContraparte(accountID string) {
 }
 
 // conferirContrapartes garante que cada conta da outra perna é DA CASA DO
-// TOKEN e está ativa, antes de o par ser gravado.
+// TOKEN e está ativa, antes de o par ser gravado — e devolve, para cada id
+// PEDIDO, o id CANÔNICO que o banco reconheceu.
 //
 // A tradução do erro segue contaDeDestino: conta de outra casa é o MESMO
 // ErrAccountNotFound de conta inexistente (404, S1) — a resposta nunca
@@ -632,17 +639,55 @@ func (p *planoDeEscrita) lembrarContraparte(accountID string) {
 // aponta a conta do lote. O serviço de lançamentos repete a conferência
 // dentro da mesma transação (defesa em profundidade); esta existe para a
 // resposta apontar o campo certo.
-func (s *Service) conferirContrapartes(ctx context.Context, householdID string, ids []string) error {
+//
+// ⚠️ O MAPA não é conveniência: a contraparte é o ÚNICO id de conta do confirm
+// que vem do corpo da requisição, e ele chega sem trim e sem teto de tamanho.
+// `WHERE id = ?` casa `"<uuid>   "` no MSSQL (padding ANSI) e `"<UUID>"` no
+// MySQL 8 (`utf8mb4_0900_ai_ci`), então a conta existe, o par é aceito — e a
+// perna seria GRAVADA com a string do cliente, que nenhum mapa em Go depois
+// encontra. O que vale daqui para a frente é `c.ID`.
+func (s *Service) conferirContrapartes(ctx context.Context, householdID string, ids []string) (map[string]string, error) {
+	canonicas := make(map[string]string, len(ids))
 	for _, id := range ids {
 		c, err := s.accounts.ByID(ctx, householdID, id)
 		if err != nil {
 			if errors.Is(err, account.ErrNotFound) {
-				return ErrAccountNotFound
+				return nil, ErrAccountNotFound
 			}
-			return fmt.Errorf("buscando a conta da outra perna: %w", err)
+			return nil, fmt.Errorf("buscando a conta da outra perna: %w", err)
 		}
 		if c.ArchivedAt != nil {
-			return ErrCounterpartArchived
+			return nil, ErrCounterpartArchived
+		}
+		canonicas[id] = c.ID
+	}
+	return canonicas, nil
+}
+
+// canonizarContas troca, em cada linha planejada, o id de conta PEDIDO pelo
+// CANÔNICO que o banco devolveu — e só depois disso reconfere que nenhum par
+// ficou com as duas pernas na mesma conta.
+//
+// A ordem importa e é o ponto deste método. `conferirDecisoes` já recusa
+// contraparte igual à conta do lote (ErrSameAccountTransfer, 400 no campo),
+// mas compara STRINGS: com a caixa trocada, `"<UUID-do-lote>"` não é igual a
+// `"<uuid-do-lote>"` em Go e passa — enquanto o `ByID` do MySQL resolve os
+// dois para a mesma conta. Sem esta reconferência, a canonização
+// TRANSFORMARIA um pedido que a borda recusava num par de pernas na mesma
+// conta, gravado em silêncio. O erro é o MESMO da borda, para a resposta não
+// mudar de forma conforme o dialeto.
+func (p *planoDeEscrita) canonizarContas(contaDoLote string, canonicas map[string]string) error {
+	for i := range p.novas {
+		if canonica, ok := canonicas[p.novas[i].AccountID]; ok {
+			p.novas[i].AccountID = canonica
+		}
+	}
+	for i := range p.contrapartes {
+		if canonica, ok := canonicas[p.contrapartes[i]]; ok {
+			if canonica == contaDoLote {
+				return ErrSameAccountTransfer
+			}
+			p.contrapartes[i] = canonica
 		}
 	}
 	return nil

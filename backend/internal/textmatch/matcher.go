@@ -74,11 +74,12 @@ const maxMemoEntries = 20_000
 // retido por requisição, gastando 6,6% de MaxMatchWork em 0,8 s — ou seja, nem
 // o orçamento, nem o transaction.PlanTimeout (0,8 s!), nem o pool de conexões
 // (a prévia do auto-categorize nem abre transação) pegavam isso. Com as cotas
-// das rotas — AutoCategorize, TransferDetect e InvestmentDetect com Burst 3
-// cada, mais ImportUpload, que não tem Burst e admite os 10 da cota
-// simultâneos: 19 operações — uma única casa empilhava > 2 GB de heap vivo, e
+// das rotas — AutoCategorize e TransferDetect com Burst 6, InvestmentDetect
+// com Burst 3, mais ImportUpload, que não tem Burst e admite os 10 da cota
+// simultâneos: 25 operações — uma única casa empilhava ~3 GB de heap vivo, e
 // não há GOMEMLIMIT nem teto de requisições em voo: o OOM derrubaria TODAS as
-// casas.
+// casas. (Eram 19 operações e > 2 GB até 21/09/2026, quando os estouros de
+// AutoCategorize e TransferDetect subiram de 3 para 6 — ADR-036 (f).)
 //
 // POR QUE ESTE NÚMERO. Um Match são 40 bytes: dois cabeçalhos de string e um
 // int. O TEXTO não é copiado — OwnerID e Keyword apontam para as strings que o
@@ -100,26 +101,86 @@ const maxMemoEntries = 20_000
 // (classify.Load, chamado em transaction/autocategorize.go), não compartilhado
 // entre elas. Somar só as linhas lidas subestima o empilhamento em ~2,4×.
 //
-// O PIOR EMPILHAMENTO QUE AS COTAS PERMITEM, POR CASA, são 19 operações
-// simultâneas: AutoCategorize 3 + TransferDetect 3 + InvestmentDetect 3
-// (Burst 3 cada) + ImportUpload 10 — esta última porque `Burst` 0 significa
-// `Burst = Requests`, e a cota dela é 10/h (config.RateLimits). São
-// 19 × ~46 MiB = ~860–900 MiB (≈ 900–940 MB) por casa — e NÃO os ~200 MB da
-// primeira versão deste comentário, nem os ~350–380 MB da segunda, que
-// somavam APENAS a linha das 10.000 linhas lidas (19 × ~19 MiB) e deixavam de
-// fora a memo e o Set. As unidades também estavam trocadas: 100.000 × 40 B × 3
-// são 12 MB, ou 11,4 MiB — não "12,1 MiB".
+// O PIOR EMPILHAMENTO QUE AS COTAS PERMITEM, POR CASA, são 28 operações
+// simultâneas: AutoCategorize 6 + TransferDetect 6 (Burst 6 desde 21/09/2026,
+// ADR-036 (f)) + InvestmentDetect 3 (Burst 3) + ImportUpload 10 — esta última
+// porque `Burst` 0 significa `Burst = Requests`, e a cota dela é 10/h
+// (config.RateLimits) — + AiImportPreview 3 (Burst 3, E9b). As 25 primeiras
+// são operações de CLASSIFICAÇÃO (classify.Load: três matchers, o Set
+// inteiro e até 10.000 linhas lidas) e custam o quadro acima; as 3 da prévia
+// do import de IA são OUTRA classe, e o custo delas foi MEDIDO à parte
+// (internal/aiimport/impact_memoria_test.go, 21/09/2026):
+//
+//	UM matcher, com no máximo 1.000 palavras novas (50 contas × 20) e
+//	memo no teto de maxMemoMatches ......... 3,9 MiB medidos, matcher vivo
+//	+ as até 5.000 linhas AGREGADAS lidas (transaction.MaxDescriptionGroupRows,
+//	  duas strings de ≤ 140 runas cada) ...... ≤ ~6 MiB no pior caso
+//	+ o índice da casa e o payload (≤ 128 KiB)  ~1 MiB
+//	                                            ------------------------
+//	  por PRÉVIA ................................ ≤ ~12 MiB (pior caso)
+//
+// A prévia NÃO carrega o Set da casa nem 10.000 lançamentos: o matcher dela
+// indexa só as palavras que ENTRARIAM, e a matéria é a agregação por
+// descrição, não o razão linha a linha. Somar 47 MiB por prévia, como o
+// ADR-036 (f) fez ao anunciar "28 operações (≈ 1,23–1,29 GiB)" antes da
+// medição, superestimava esta parcela em ~4×. São
+//
+//	25 × ~45 MiB + 3 × ~12 MiB = 1.161 MiB ≈ 1,13 GiB  (piso)
+//	25 × ~47 MiB + 3 × ~12 MiB = 1.211 MiB ≈ 1,18 GiB  (teto)
+//
+// ou seja ~1,13–1,18 GiB (≈ 1,22–1,27 GB) por casa: +3% sobre as 25
+// operações de antes da E9b, e +35% sobre as 19 operações e ~860–900 MiB de
+// antes de 21/09/2026 — e NÃO os ~200 MB da primeira versão deste
+// comentário, nem os ~350–380 MB da segunda, que somavam APENAS a linha das
+// 10.000 linhas lidas e deixavam de fora a memo e o Set. As unidades também
+// estavam trocadas: 100.000 × 40 B × 3 são 12 MB, ou 11,4 MiB — não
+// "12,1 MiB".
+//
+// ⚠️ O TOKEN BUCKET LIMITA CHEGADA, NÃO CONCORRÊNCIA. As 6 de um balde podem
+// estar em voo ao mesmo tempo: nada as serializa. E os baldes são
+// INDEPENDENTES e somam POR CASA — é por isso que a restrição que amarra o
+// estouro é ESTA contabilidade de heap, e não o pool de conexões, que
+// `ImportConfirm` já admite ocupar com 30 simultâneas por ter `Burst` zero.
+//
+// ⚠️ A E9b (21/09/2026) REFEZ ESTA CONTA. `POST /ai/keyword-import/preview`
+// roda o `textmatch` sobre as descrições da janela para medir o impacto de
+// cada palavra-chave de conta (spec 0010 §4.4) e tem `Burst` 3 — o pior caso
+// são as 28 operações do quadro acima, com a parcela da prévia MEDIDA e não
+// presumida. Quem elevar o `Burst` da prévia refaz a soma; quem mudar o que a
+// prévia retém (um segundo matcher, o razão linha a linha) refaz a medição —
+// o teste de heap dela falha se a ordem de grandeza mudar.
+//
+// A conta é do ESTOURO, não da cota horária. Por isso ela vale igual no perfil
+// `default` e no `dev` (18/09/2026), que multiplica por 5 a cota da importação
+// mas fixa o estouro das três regras NA COTA DO PADRÃO exatamente para não
+// mexer neste número (achado F2 da revisão de segurança).
+//
+// Ela NÃO vale no perfil `test`: lá as regras de importação seguem sem Burst
+// (estouro 200/400/300) e as rotas de detecção têm Burst 30, o que dá uma
+// ordem de grandeza completamente diferente. O alvo daquele perfil é um banco
+// descartável de CI, não uma instalação — quem for usá-lo fora disso refaz a
+// conta (achado R2 da segunda rodada da revisão).
+//
+// Quem elevar o ESTOURO — ou a COTA sem estouro — de QUALQUER rota que chegue
+// ao textmatch refaz esta conta antes, e não só as de importação: em
+// 21/09/2026 o estouro de duas rotas de DETECÇÃO subiu de 3 para 6 e a conta
+// ficou para trás, o que a revisão de segurança da E9a apanhou. A lista de
+// chamadores está na DEPENDÊNCIA ENTRE ENTREGAS, no fim deste comentário.
 //
 // A conclusão não muda com o número certo: o termo NÃO-LINEAR (descrições ×
 // donos, que media 118,4 MB numa requisição só) morreu com este teto, e o que
 // sobra é linear nos tetos do produto — cresce com as cotas, não com o corpus
 // que a pessoa cadastra. É por isso que o valor continua 100.000.
 //
-// DEPENDÊNCIA ENTRE ENTREGAS, e ela é de mão dupla: TRÊS rotas alcançam este
-// teto, e uma delas — POST /investments/detect — é de OUTRA entrega. Se o teto
-// for removido, afrouxado, ou reordenado para depois da gravação da memo,
-// aquela entrega volta a ter caminho de OOM sem que uma linha dela seja tocada.
-// Quem mexer aqui reavalia os três chamadores, não só o desta entrega.
+// DEPENDÊNCIA ENTRE ENTREGAS, e ela é de mão dupla: CINCO rotas alcançam
+// este teto hoje — POST /transactions/auto-categorize, POST /transfers/detect,
+// POST /investments/detect, a análise de POST /imports e, desde a E9b,
+// POST /ai/keyword-import/preview (internal/aiimport/impact.go). Duas delas —
+// POST /investments/detect e a prévia do import de IA — são de OUTRAS
+// entregas. Se o teto for removido, afrouxado, ou reordenado para depois da
+// gravação da memo, aquelas entregas voltam a ter caminho de OOM sem que uma
+// linha delas seja tocada. Quem mexer aqui reavalia os cinco chamadores, não
+// só o desta entrega.
 //
 // O caminho LEGÍTIMO não chega perto: 10.000 descrições distintas com ranking
 // realista — poucos donos por descrição, porque as palavras-chave de uma casa

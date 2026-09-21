@@ -4,9 +4,12 @@ import (
 	"net/http"
 
 	"github.com/brunorblanck/homefinance/backend/internal/account"
+	"github.com/brunorblanck/homefinance/backend/internal/aiimport"
+	"github.com/brunorblanck/homefinance/backend/internal/aiprompt"
 	"github.com/brunorblanck/homefinance/backend/internal/auth"
 	"github.com/brunorblanck/homefinance/backend/internal/cardstatement"
 	"github.com/brunorblanck/homefinance/backend/internal/category"
+	"github.com/brunorblanck/homefinance/backend/internal/dashboard"
 	"github.com/brunorblanck/homefinance/backend/internal/importer"
 	"github.com/brunorblanck/homefinance/backend/internal/investment"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/httpserver"
@@ -72,6 +75,22 @@ type routeLimiters struct {
 	// pequeno — a execução real segura conexão do pool dentro da transação.
 	investmentDetect *httpserver.Limiter
 
+	// aiExport é POR CASA e cobre GET /ai/export-prompt (spec 0010 §8.6).
+	// Balde próprio, separado dos dois baldes do import de IA: exportar o
+	// prompt não pode trancar a conferência do JSON, e a pessoa usa os três
+	// na mesma sentada. É LEITURA, mas não é barata — uma chamada agrega até
+	// 3 meses por `description_norm`, coluna sem índice próprio.
+	aiExport *httpserver.Limiter
+
+	// aiImportPreview e aiImportConfirm são POR CASA e cobrem as duas rotas
+	// do import de IA (spec 0010 §8.6), em baldes separados entre si e do
+	// export: a pessoa usa os três na mesma sentada, e um não pode trancar o
+	// outro. A prévia roda o `internal/textmatch` (e por isso entra na conta
+	// de heap de textmatch/matcher.go); o confirm grava numa transação e
+	// segura conexão do pool até terminar.
+	aiImportPreview *httpserver.Limiter
+	aiImportConfirm *httpserver.Limiter
+
 	// transactionUpdate é POR CASA e cobre PATCH /transactions/{id} (emenda
 	// §11). Não é escrita em massa — uma linha por chamada —, mas escreve e
 	// AUDITA a cada chamada, e até 17/09/2026 só o balde global por IP a
@@ -90,6 +109,9 @@ type routeDeps struct {
 	importer      *importer.Handler
 	report        *report.Handler
 	investment    *investment.Handler
+	dashboard     *dashboard.Handler
+	aiPrompt      *aiprompt.Handler
+	aiImport      *aiimport.Handler
 	ready         http.HandlerFunc
 	limiters      routeLimiters
 	requireAuth   httpserver.Middleware
@@ -406,6 +428,74 @@ func buildRoutes(d routeDeps) []Route {
 			Pattern:     "/reports/by-category",
 			Handler:     d.report.ByCategory,
 			Middlewares: []httpserver.Middleware{d.requireAuth},
+		},
+
+		// --- painel: o resumo do mês (spec 0008, ADR-031) ------------------
+		//
+		// UM middleware, e isso é decisão registrada (ADR-031e): requireAuth e
+		// o limitador GLOBAL por IP, sem balde próprio e sem teto por casa.
+		// Esta é a rota da HOME, a mais chamada do app — um balde por casa
+		// transformaria abrir o app e trocar de mês em 429 na primeira tela.
+		// Balde próprio existe aqui para escrita em massa (auto-categorize,
+		// transfers/detect, investments/detect) e para a rota cara (imports);
+		// esta é leitura pura, com custo limitado pelo domínio (≤ 200
+		// categorias, ≤ 50 contas, ≤ 100 linhas agregadas) e sem transação
+		// segurando conexão do pool — a mesma classe de GET /investments e
+		// GET /reports/by-category.
+		{
+			Method:      http.MethodGet,
+			Pattern:     "/dashboard",
+			Handler:     d.dashboard.Summary,
+			Middlewares: []httpserver.Middleware{d.requireAuth},
+		},
+
+		// --- menu IA: exportar o prompt (spec 0010, E9a) -------------------
+		//
+		// Leitura PURA — não escreve lançamento, categoria nem auditoria —, e
+		// mesmo assim com balde POR CASA, ao contrário do painel e do
+		// relatório: a agregação por `description_norm` varre até 3 meses numa
+		// coluna sem índice próprio, e a resposta é um texto grande montado em
+		// memória. É a classe da importação, não a da home.
+		//
+		// A ordem dos middlewares importa: requireAuth PRIMEIRO, porque é ele
+		// que publica no contexto a identidade de que o limitador por casa
+		// deriva a chave (HMAC do household_id, nunca o id em claro).
+		{
+			Method:  http.MethodGet,
+			Pattern: "/ai/export-prompt",
+			Handler: d.aiPrompt.ExportPrompt,
+			Middlewares: []httpserver.Middleware{
+				d.requireAuth,
+				httpserver.RateLimit(d.limiters.aiExport, porCasa),
+			},
+		},
+
+		// --- menu IA: importar o JSON da IA (spec 0010, E9b) ----------------
+		//
+		// As duas rotas leem o MESMO corpo (o envelope da §4.1). A prévia
+		// não escreve nada e mede o impacto rodando o matcher; o confirm
+		// revalida do zero e grava numa transação só. Cada uma tem balde
+		// PRÓPRIO por casa, e requireAuth vem PRIMEIRO — é ele que publica a
+		// identidade de que o limitador deriva a chave (HMAC do household_id,
+		// nunca o id em claro). O teto de corpo (128 KiB) é da cadeia global,
+		// por caminho exato (httpserver.MaxBytesByPath em main.go).
+		{
+			Method:  http.MethodPost,
+			Pattern: "/ai/keyword-import/preview",
+			Handler: d.aiImport.Preview,
+			Middlewares: []httpserver.Middleware{
+				d.requireAuth,
+				httpserver.RateLimit(d.limiters.aiImportPreview, porCasa),
+			},
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/ai/keyword-import/confirm",
+			Handler: d.aiImport.Confirm,
+			Middlewares: []httpserver.Middleware{
+				d.requireAuth,
+				httpserver.RateLimit(d.limiters.aiImportConfirm, porCasa),
+			},
 		},
 
 		// --- importação em duas fases (ADR-024) ---------------------------

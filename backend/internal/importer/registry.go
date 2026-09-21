@@ -101,9 +101,9 @@ type Document struct {
 // dos pacotes — e é essa lista que decide se a fatura entra pelo parser do
 // extrato, com o sinal invertido do começo ao fim.
 //
-// Hoje a lista tem os quatro leiautes (extrato e fatura do Nubank e do C6);
-// um leiaute novo é um parser mais uma fixture no construtor, sem tocar no
-// núcleo (spec 0004 §7).
+// Hoje a lista tem cinco leiautes (extrato e fatura do Nubank e do C6, e o
+// extrato do Inter); um leiaute novo é um parser mais uma fixture no
+// construtor, sem tocar no núcleo (spec 0004 §7).
 type Registry struct {
 	parsers []Parser
 	byID    map[string]Parser

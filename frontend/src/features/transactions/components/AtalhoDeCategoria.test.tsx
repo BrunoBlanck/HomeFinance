@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '@/app/router'
 import { MSG_CATEGORIA_RECUSADA } from '@/lib/errors'
-import { fraseDosOutros, proximaLacuna } from './AtalhoDeCategoria'
+import { fraseDosOutros, proximaLacuna, proximoAtalho } from './AtalhoDeCategoria'
 
 /** O atalho de categorização vive DENTRO da tabela de `/lancamentos`: o botão
  *  numa célula, o editor numa linha de detalhe, o foco pulando de lacuna em
@@ -115,6 +115,45 @@ const ARVORE = {
   redemption: [categoria({ id: 'cat-resgates', name: 'Resgates', kind: 'redemption' })],
 }
 
+type GrupoDaArvore = {
+  id: string
+  name: string
+  kind: string
+  children?: readonly { id: string; name: string; kind: string }[]
+}
+
+/** Percorre a árvore (a padrão ou a que o teste passou) e devolve o nó do id. */
+function noDaArvore(id: unknown, arvore: unknown = ARVORE) {
+  const listas = Object.values((arvore ?? {}) as Record<string, readonly GrupoDaArvore[]>)
+  for (const lista of listas) {
+    for (const grupo of lista ?? []) {
+      if (grupo.id === id) return grupo
+      const filha = (grupo.children ?? []).find((c) => c.id === id)
+      if (filha) return filha
+    }
+  }
+  return undefined
+}
+
+/** O nome de uma categoria da árvore do teste, pelo id.
+ *
+ *  A árvore é PARÂMETRO desde o QA da §19: os testes que passam uma árvore
+ *  própria (nomes hostis, grupo com filhas) precisam que o `PATCH` devolva o
+ *  nome daquela árvore, e não `null` — é esse nome que a célula mostra depois
+ *  do refetch e que o toast da troca seguinte cita. */
+function nomeDaCategoria(id: unknown, arvore: unknown = ARVORE): string | null {
+  return noDaArvore(id, arvore)?.name ?? null
+}
+
+/** Em qual recorte de `?tipo=` uma linha cai — a mesma partição do servidor
+ *  (E2d): a natureza da CATEGORIA decide antes do lado do dinheiro. */
+function grupoDaLinha(linha: Lancamento, arvore: unknown): string {
+  if (linha.kind === 'transfer_out' || linha.kind === 'transfer_in') return 'transfer'
+  const natureza = noDaArvore(linha.categoryId, arvore)?.kind
+  if (natureza === 'investment' || natureza === 'redemption') return 'investment'
+  return linha.kind === 'income' ? 'income' : 'expense'
+}
+
 type Lancamento = Record<string, unknown> & { id: string }
 
 function lancamento(over: Record<string, unknown> = {}): Lancamento {
@@ -191,11 +230,16 @@ type Chamada = { metodo: string; caminho: string; corpo: Record<string, unknown>
 function servidor(opcoes: {
   lancamentos?: Lancamento[]
   categorias?: unknown
+  /** Honra o `kindGroup` da URL, como o servidor de verdade — é o que faz a
+   *  linha SAIR da lista quando a categoria nova contradiz o filtro. Fora
+   *  daqui o recorte não muda nada, e os testes de toast não precisam dele. */
+  filtrarPorTipo?: boolean
   aoPatchCategoria?: (id: string, corpo: Record<string, unknown>) => Response
   aoPatchLancamento?: (id: string, corpo: Record<string, unknown>) => Response | null
   aoAutoCategorizar?: (corpo: Record<string, unknown>) => Response
 }) {
   const lancamentos = opcoes.lancamentos ?? lancamentosPadrao()
+  const arvore = opcoes.categorias ?? ARVORE
   const chamadas: Chamada[] = []
 
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -207,12 +251,17 @@ function servidor(opcoes: {
 
     if (caminho === '/me') return jsonResponse(200, SESSAO)
     if (caminho === '/accounts') return jsonResponse(200, CONTAS)
-    if (caminho === '/categories') return jsonResponse(200, opcoes.categorias ?? ARVORE)
+    if (caminho === '/categories') return jsonResponse(200, arvore)
     if (caminho === '/transactions' && metodo === 'GET') {
+      const grupo = opcoes.filtrarPorTipo ? completa.searchParams.get('kindGroup') : null
+      const itens = grupo
+        ? lancamentos.filter((item) => grupoDaLinha(item, arvore) === grupo)
+        : lancamentos
       return jsonResponse(200, {
-        items: lancamentos,
+        items: itens,
         nextCursor: null,
-        summary: resumo(lancamentos),
+        // O `summary` do contrato conta o RECORTE (spec 0004 §12.2).
+        summary: resumo(itens),
       })
     }
     if (caminho === '/transactions/auto-categorize' && metodo === 'POST') {
@@ -245,7 +294,9 @@ function servidor(opcoes: {
       const alvo = lancamentos.find((item) => item.id === patchLancamento[1])
       if (!alvo) return jsonResponse(404, { error: { code: 'NOT_FOUND', message: 'nao' } })
       alvo.categoryId = corpo?.categoryId
-      alvo.categoryName = corpo?.categoryId === 'cat-alimentacao' ? 'Alimentação' : 'Uber'
+      // O nome vem da árvore, como no servidor de verdade: é ele que a célula
+      // mostra depois do refetch, e o modo trocar depende de ver o nome NOVO.
+      alvo.categoryName = nomeDaCategoria(corpo?.categoryId, arvore)
       return jsonResponse(200, alvo)
     }
     throw new Error(`rota não declarada no teste: ${metodo} ${caminho}${completa.search}`)
@@ -259,22 +310,31 @@ function servidor(opcoes: {
   }
 }
 
-function renderLancamentos(caminho = '/lancamentos?mes=2026-09') {
+function renderLancamentos(
+  caminho = '/lancamentos?mes=2026-09',
+  semear?: (cliente: QueryClient) => void,
+) {
   const router = createAppRouter(createMemoryHistory({ initialEntries: [caminho] }))
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  // O cache pode já ter outras queries do app — o painel e o relatório penduram
+  // as chaves deles sob o mesmo prefixo `transactions` (ADR-027).
+  semear?.(queryClient)
   render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   )
-  return router
+  return { router, queryClient }
 }
 
 const NOME_DA_LACUNA_1 = /^Sem categoria\. Categorizar Mercado do seu José, 12\/09\/2026/
 const NOME_DA_LACUNA_2 = /^Sem categoria\. Categorizar Posto Ipiranga/
 const NOME_DA_LACUNA_3 = /^Sem categoria\. Categorizar Farmácia Popular/
+/** O outro estado fechado (emenda §19): o nome da categoria abre o nome
+ *  acessível, e o verbo é **trocar**. */
+const NOME_DA_CATEGORIZADA = /^Alimentação\. Trocar categoria de Pão de Açúcar/
 
 /** A instância VISÍVEL do botão — no jsdom não há layout, então é a primeira
  *  do DOM (a da coluna), que é a que a tela usa acima de 40rem. */
@@ -291,6 +351,15 @@ async function abrirEditor(nome: RegExp = NOME_DA_LACUNA_1) {
   return { user, editor }
 }
 
+/** O mesmo editor, aberto pelo outro estado fechado — a legenda muda com o
+ *  modo (`Trocar categoria de …`). */
+async function abrirParaTrocar(nome: RegExp = NOME_DA_CATEGORIZADA) {
+  const user = userEvent.setup()
+  await user.click(lacuna(nome))
+  const editor = await screen.findByRole('group', { name: /^Trocar categoria de / })
+  return { user, editor }
+}
+
 describe('AtalhoDeCategoria — o controle da célula', () => {
   beforeEach(() => {
     sessionStorage.clear()
@@ -303,7 +372,7 @@ describe('AtalhoDeCategoria — o controle da célula', () => {
     vi.unstubAllGlobals()
   })
 
-  it('só a linha de receita/despesa sem categoria tem a lacuna; transferência e categorizada não', async () => {
+  it('a lacuna é controle e traz data-lacuna; a transferência não tem controle nenhum', async () => {
     servidor({})
     renderLancamentos()
     await screen.findByText('Mercado do seu José')
@@ -319,16 +388,47 @@ describe('AtalhoDeCategoria — o controle da célula', () => {
     expect(instancias[0]).toHaveAttribute('id', 'atalho-categoria-tx-1-coluna')
     expect(instancias[1]).toHaveAttribute('id', 'atalho-categoria-tx-1-secundaria')
     expect(instancias[0]).toHaveAttribute('data-atalho', 'tx-1')
+    expect(instancias[0]).toHaveAttribute('data-instancia', 'coluna')
+    expect(instancias[1]).toHaveAttribute('data-instancia', 'secundaria')
+    // `data-lacuna` SÓ na pendência: é por ele que a próxima lacuna é
+    // procurada, e a linha categorizada não pode entrar nessa conta.
+    expect(instancias[0]).toHaveAttribute('data-lacuna')
 
-    // A transferência mostra a etiqueta; a categorizada, o nome — sem botão.
-    expect(screen.getByText('Transferência')).toBeInTheDocument()
+    // Perna de transferência não tem categoria por desenho: etiqueta, e nada
+    // de controle — nem para categorizar, nem para trocar.
+    expect(screen.getAllByText('Transferência').length).toBeGreaterThan(0)
+    // (o botão de excluir da linha continua lá; o que não existe é controle
+    // de categoria, em nenhum dos dois estados)
     expect(
-      screen.queryByRole('button', { name: /Categorizar Pix para Cartão/ }),
+      screen.queryByRole('button', {
+        name: /(Categorizar|Trocar categoria de) Pix para Cartão/,
+      }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: /Categorizar Pão de Açúcar/ }),
-    ).not.toBeInTheDocument()
-    expect(screen.getAllByText('Alimentação').length).toBeGreaterThan(0)
+  })
+
+  // Emenda §19: o outro estado FECHADO do mesmo controle.
+  it('a linha categorizada tem o mesmo controle, com o nome da categoria e sem data-lacuna', async () => {
+    servidor({})
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const instancias = screen.getAllByRole('button', { name: NOME_DA_CATEGORIZADA })
+    expect(instancias).toHaveLength(2)
+    const [coluna, secundaria] = instancias as [HTMLButtonElement, HTMLButtonElement]
+    // O texto visível é o nome da categoria, e está contido no nome acessível
+    // (WCAG 2.5.3), que diz de qual linha é.
+    expect(coluna).toHaveTextContent('Alimentação')
+    expect(coluna).toHaveAttribute('id', 'atalho-categoria-tx-ok-coluna')
+    expect(secundaria).toHaveAttribute('id', 'atalho-categoria-tx-ok-secundaria')
+    // Nos dois estados: `data-atalho` (por onde o foco volta à linha) e
+    // `data-instancia` (o alinhamento na coluna).
+    expect(coluna).toHaveAttribute('data-atalho', 'tx-ok')
+    expect(coluna).toHaveAttribute('data-instancia', 'coluna')
+    // Nunca na categorizada: ela não é pendência.
+    expect(coluna).not.toHaveAttribute('data-lacuna')
+    // Disclosure fechado, como a lacuna.
+    expect(coluna).toHaveAttribute('aria-expanded', 'false')
+    expect(coluna).not.toHaveAttribute('aria-controls')
   })
 
   it('abre o editor na própria linha, com o foco no select e o confirmar aguardando a categoria', async () => {
@@ -405,7 +505,7 @@ describe('AtalhoDeCategoria — o controle da célula', () => {
 
   it('trocar o mês fecha o editor', async () => {
     servidor({})
-    const router = renderLancamentos()
+    const { router } = renderLancamentos()
     await screen.findByText('Mercado do seu José')
 
     await abrirEditor()
@@ -849,14 +949,29 @@ describe('fraseDosOutros', () => {
 })
 
 describe('proximaLacuna', () => {
+  /** Só lacunas: `data-lacuna` é o que a busca da próxima pendência consulta.
+   *  Desde a emenda §19 `data-atalho` está TAMBÉM nas linhas categorizadas, e
+   *  procurar por ele trataria a vizinha resolvida como "próximo trabalho". */
   function lacunas(ids: readonly string[]) {
     document.body.innerHTML = ids
-      .map((id) => `<button type="button" data-atalho="${id}">Sem categoria</button>`)
+      .map((id) => `<button type="button" data-atalho="${id}" data-lacuna>Sem categoria</button>`)
       .join('')
   }
 
   afterEach(() => {
     document.body.innerHTML = ''
+  })
+
+  it('ignora a linha categorizada: ela tem data-atalho, mas não é lacuna', () => {
+    document.body.innerHTML = [
+      '<button type="button" data-atalho="a" data-lacuna>Sem categoria</button>',
+      '<button type="button" data-atalho="b">Alimentação</button>',
+      '<button type="button" data-atalho="c" data-lacuna>Sem categoria</button>',
+    ].join('')
+    // A seguinte de "a" é "c" — "b" já tem dona e não é trabalho pendente.
+    expect(proximaLacuna('a', ['a', 'c'])?.dataset.atalho).toBe('c')
+    // E o vizinho do modo trocar enxerga as três, na ordem da tabela.
+    expect(proximoAtalho('a', ['a', 'b', 'c'])?.dataset.atalho).toBe('b')
   })
 
   it('a seguinte na ordem de antes; senão a anterior; senão qualquer uma; senão nada', () => {
@@ -877,6 +992,38 @@ describe('proximaLacuna', () => {
     expect(proximaLacuna('a', antes)?.dataset.atalho).toBe('c')
     lacunas(['a'])
     expect(proximaLacuna('a', antes)).toBeNull()
+  })
+})
+
+/** `proximoAtalho` — o vizinho do modo trocar (emenda §19).
+ *
+ *  Mesma busca da `proximaLacuna`, com duas diferenças: olha TODO controle de
+ *  categoria (`data-atalho`, qualquer estado) e **para** na anterior. Pular
+ *  para uma linha aleatória da tabela não é devolver o foco a quem estava
+ *  trabalhando numa linha específica. */
+describe('proximoAtalho', () => {
+  function atalhos(ids: readonly string[]) {
+    document.body.innerHTML = ids
+      .map((id) => `<button type="button" data-atalho="${id}">Alimentação</button>`)
+      .join('')
+  }
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('a seguinte da foto; senão a anterior; nunca "qualquer uma que sobrou"', () => {
+    const antes = ['a', 'b', 'c', 'd']
+    atalhos(['a', 'c', 'd'])
+    expect(proximoAtalho('b', antes)?.dataset.atalho).toBe('c')
+    atalhos(['a', 'b'])
+    expect(proximoAtalho('c', antes)?.dataset.atalho).toBe('b')
+    // Uma linha que nem estava na foto NÃO serve de destino — este é o passo
+    // que o modo trocar não tem.
+    atalhos(['z'])
+    expect(proximoAtalho('c', antes)).toBeNull()
+    atalhos([])
+    expect(proximoAtalho('c', antes)).toBeNull()
   })
 })
 
@@ -922,7 +1069,7 @@ describe('AtalhoDeCategoria — QA da emenda §11', () => {
 
   it('trocar a conta ou o filtro fecha o editor sem gravar', async () => {
     const { escritas } = servidor({})
-    const router = renderLancamentos()
+    const { router } = renderLancamentos()
     await screen.findByText('Mercado do seu José')
 
     // Com a categoria já escolhida e a ficha pressionada: nada disso vira
@@ -1299,5 +1446,943 @@ describe('AtalhoDeCategoria — 422 da emenda §13', () => {
     // E (c) nem chega a rodar: o mês não é reprocessado sobre uma categoria
     // que o servidor acabou de recusar.
     expect(chamadas.some((c) => c.caminho === '/transactions/auto-categorize')).toBe(false)
+  })
+})
+
+/** A linha que some (docs/DESIGN.md, E2d (g)).
+ *
+ *  Com `tipo=despesas` ativo, categorizar uma linha como investimento a tira da
+ *  lista na hora — a pessoa acabou de aprender, sem querer, que a natureza da
+ *  categoria decide o tipo do lançamento. Sumir em silêncio é inaceitável. */
+describe('AtalhoDeCategoria — a linha que sai da lista (E2d)', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    localStorage.clear()
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('sob despesas, o toast de sucesso diz que a linha saiu e por quê', async () => {
+    servidor({})
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=despesas')
+    await screen.findByText('Mercado do seu José')
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-cdb')
+    await user.click(within(editor).getByRole('button', { name: 'Categorizar' }))
+
+    // Continua DE SUCESSO: nada falhou, ela fez o que quis.
+    expect(
+      await screen.findByText(
+        'Lançamento categorizado como CDB. Ele saiu da lista: é um aporte, e a lista mostra só despesas.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('sob receitas, a frase fala em resgate', async () => {
+    servidor({
+      lancamentos: [
+        lancamento({
+          id: 'tx-1',
+          kind: 'income',
+          description: 'Mercado do seu José',
+          amountCents: 90_000,
+        }),
+      ],
+    })
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=receitas')
+    await screen.findByText('Mercado do seu José')
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-resgates')
+    await user.click(within(editor).getByRole('button', { name: 'Categorizar' }))
+
+    expect(
+      await screen.findByText(
+        'Lançamento categorizado como Resgates. Ele saiu da lista: é um resgate, e a lista mostra só receitas.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('em Tudo o toast é o de hoje, sem acréscimo — a linha não saiu de lugar nenhum', async () => {
+    servidor({})
+    renderLancamentos()
+    await screen.findByText('Mercado do seu José')
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-cdb')
+    await user.click(within(editor).getByRole('button', { name: 'Categorizar' }))
+
+    expect(await screen.findByText('Lançamento categorizado como CDB.')).toBeInTheDocument()
+    expect(screen.queryByText(/saiu da lista/)).not.toBeInTheDocument()
+  })
+
+  it('com categoria do mesmo lado do dinheiro, o filtro ativo não muda o toast', async () => {
+    servidor({})
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=despesas')
+    await screen.findByText('Mercado do seu José')
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-alimentacao')
+    await user.click(within(editor).getByRole('button', { name: 'Categorizar' }))
+
+    expect(await screen.findByText('Lançamento categorizado como Alimentação.')).toBeInTheDocument()
+    expect(screen.queryByText(/saiu da lista/)).not.toBeInTheDocument()
+  })
+
+  it('na saída com palavra-chave, a frase entra DEPOIS do texto de hoje', async () => {
+    servidor({})
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=despesas')
+    await screen.findByText('Mercado do seu José')
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-cdb')
+    await user.click(within(editor).getByRole('button', { name: 'Reconhecer por «mercado»' }))
+    await user.click(
+      within(editor).getByRole('button', { name: 'Categorizar e reconhecer por «mercado»' }),
+    )
+
+    expect(
+      await screen.findByText(
+        '«mercado» adicionada a CDB · mais 2 lançamentos de setembro categorizados. Este lançamento saiu da lista: é um aporte, e a lista mostra só despesas.',
+      ),
+    ).toBeInTheDocument()
+  })
+})
+
+/** Emenda §19 da spec 0005 (18/09/2026) — trocar a categoria de uma linha que
+ *  já tem uma, a qualquer momento (pedido do usuário).
+ *
+ *  O que é novo aqui é a linha JÁ CATEGORIZADA como ponto de partida: o mesmo
+ *  controle no outro estado fechado, o mesmo editor em modo trocar, e um foco
+ *  que volta para a própria linha em vez de caçar a próxima pendência. */
+describe('AtalhoDeCategoria — modo trocar (emenda §19)', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    localStorage.clear()
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('abre com a categoria atual selecionada, e confirmar com ela não emite requisição', async () => {
+    const { escritas } = servidor({})
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    const select = within(editor).getByRole('combobox', { name: /^Categoria de Pão de Açúcar/ })
+    // A pessoa vê de onde está saindo antes de escolher para onde vai.
+    expect(select).toHaveValue('cat-alimentacao')
+    expect(select).toHaveFocus()
+
+    // Com a atual escolhida não há troca — e não há o que aprender: as fichas
+    // só existem com escolha diferente.
+    expect(within(editor).queryByText('Da próxima vez, reconhecer por')).not.toBeInTheDocument()
+    const confirmar = within(editor).getByRole('button', { name: 'Escolha outra categoria' })
+    expect(confirmar).toHaveAttribute('aria-disabled', 'true')
+    expect(confirmar).not.toBeDisabled()
+
+    // O clique leva ao campo, e NENHUMA requisição sai: não existe "trocar
+    // para a mesma".
+    await user.click(confirmar)
+    expect(select).toHaveFocus()
+    expect(escritas()).toHaveLength(0)
+
+    // Escolher outra troca o verbo do rótulo e devolve as fichas.
+    await user.selectOptions(select, 'cat-uber')
+    expect(within(editor).getByRole('button', { name: 'Trocar categoria' })).toBeInTheDocument()
+    expect(within(editor).getByText('Da próxima vez, reconhecer por')).toBeInTheDocument()
+  })
+
+  it('um PATCH só; o toast diz de onde para onde e o foco volta ao botão da MESMA linha', async () => {
+    const { escritas } = servidor({})
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText('Categoria trocada de Alimentação para Uber.'),
+    ).toBeInTheDocument()
+    expect(escritas()).toEqual([
+      { metodo: 'PATCH', caminho: '/transactions/tx-ok', corpo: { categoryId: 'cat-uber' } },
+    ])
+    expect(editor).not.toBeInTheDocument()
+
+    // O foco volta para a linha que ela estava editando — nunca para a próxima
+    // lacuna, que é o trabalho de outra pergunta.
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('data-atalho', 'tx-ok'))
+    // E o botão mostra o nome novo.
+    const linha = screen.getByText('Pão de Açúcar').closest('tr') as HTMLElement
+    expect(
+      within(linha).getAllByRole('button', { name: /^Uber\. Trocar categoria de/ }).length,
+    ).toBeGreaterThan(0)
+    // As lacunas continuam intocadas: trocar uma linha não mexe em nenhuma
+    // outra.
+    expect(screen.getAllByRole('button', { name: NOME_DA_LACUNA_1 })).toHaveLength(2)
+  })
+
+  it('com palavra-chave, a troca desta linha vem ANTES da palavra e do número do mês', async () => {
+    const { escritas } = servidor({})
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+    const [ficha] = within(editor).getAllByRole('button', { name: /^Reconhecer por «/ })
+    await user.click(ficha as HTMLElement)
+    await user.click(within(editor).getByRole('button', { name: /^Trocar e reconhecer por «/ }))
+
+    // A ordem importa: "«uber» adicionada a Uber" NÃO implica esta linha (no
+    // modo categorizar, implicava), então a troca é dita primeiro.
+    expect(
+      await screen.findByText(
+        /^Categoria trocada de Alimentação para Uber · «[^»]+» adicionada a Uber · mais 3 lançamentos de setembro categorizados\.$/,
+      ),
+    ).toBeInTheDocument()
+    expect(escritas().map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'PATCH /categories/cat-uber',
+      'PATCH /transactions/tx-ok',
+      'POST /transactions/auto-categorize',
+    ])
+  })
+
+  it('Escape devolve o foco ao botão da linha e nada é gravado', async () => {
+    const { escritas } = servidor({})
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+    await user.keyboard('{Escape}')
+
+    expect(editor).not.toBeInTheDocument()
+    expect(document.activeElement).toHaveAttribute('data-atalho', 'tx-ok')
+    expect(escritas()).toHaveLength(0)
+  })
+
+  /** O cache do painel sob o mesmo prefixo (ADR-027) — regressão.
+   *
+   *  `['transactions']` é PREFIXO: sob ele moram o painel
+   *  (`['transactions','dashboard',mes]`) e o relatório por categoria, que não
+   *  são listas paginadas. Sem a guarda do `pages`, o `.map` lançava dentro do
+   *  `onSuccess`, a mutação caía no `onError` e a pessoa via um toast de erro
+   *  com o PATCH JÁ GRAVADO — o pior desfecho possível. */
+  it('com o painel em cache, a gravação atualiza a lista e não toca no painel', async () => {
+    const painel = {
+      month: '2026-09',
+      investmentNetCents: -25_000,
+      incomeCents: 530_000,
+      incomeCount: 3,
+      creditCardExpenseCents: 120_000,
+      creditCardExpenseCount: 7,
+    }
+    const { escritas } = servidor({})
+    const { queryClient } = renderLancamentos('/lancamentos?mes=2026-09', (cliente) => {
+      cliente.setQueryData(['transactions', 'dashboard', '2026-09'], painel)
+      cliente.setQueryData(
+        ['transactions', 'reports', 'by-category', { mes: '2026-09', kind: 'expense' }],
+        { rows: [], totalCents: 0 },
+      )
+    })
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    // Sucesso, e não o toast de erro que o TypeError produzia.
+    expect(
+      await screen.findByText('Categoria trocada de Alimentação para Uber.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Algo falhou do nosso lado/)).not.toBeInTheDocument()
+    expect(escritas()).toHaveLength(1)
+
+    // O dado do painel fica INTACTO — nenhuma tentativa de mapear `pages`.
+    expect(queryClient.getQueryData(['transactions', 'dashboard', '2026-09'])).toEqual(painel)
+    // E a lista recebeu a linha nova no mesmo frame.
+    const linha = screen.getByText('Pão de Açúcar').closest('tr') as HTMLElement
+    expect(within(linha).getAllByText('Uber').length).toBeGreaterThan(0)
+  })
+
+  /** A QUARTA forma sob o prefixo — regressão do achado C1 da revisão de
+   *  segurança.
+   *
+   *  `['transactions','investments',mes]` (`features/investments/api`) é a
+   *  única outra `InfiniteData` do prefixo: tem `pages` E tem `items`, então
+   *  passa por qualquer guarda de FORMA. Enquanto só a lacuna era editável ela
+   *  nunca continha a linha em edição (`InvestmentItem` exige `categoryId`);
+   *  com a §19 a linha marcada como aporte virou editável e está lá.
+   *
+   *  Trocá-la por um `Transaction` apagaria o `flow` — a coluna "Movimento" de
+   *  `/investimentos` ficaria em branco, a linha continuaria listada numa tela
+   *  cuja premissa é "só aportes e resgates", e `monthly.contributionsCents`
+   *  seguiria contando o valor. E o lixo FICA: a invalidação é
+   *  `refetchType: 'active'` e a tela está desmontada. */
+  it('com /investimentos em cache, trocar a categoria do aporte não encosta naquele cache', async () => {
+    const VISAO_DE_INVESTIMENTOS = {
+      pageParams: [null],
+      pages: [
+        {
+          month: '2026-09',
+          monthly: {
+            contributionsCents: 200_000,
+            contributionCount: 1,
+            redemptionsCents: 0,
+            redemptionCount: 0,
+          },
+          yearToDate: {
+            contributionsCents: 200_000,
+            contributionCount: 1,
+            redemptionsCents: 0,
+            redemptionCount: 0,
+          },
+          series: [{ month: '2026-09', contributionsCents: 200_000, redemptionsCents: 0 }],
+          items: [
+            {
+              id: 'tx-aporte',
+              occurredOn: '2026-09-12',
+              flow: 'contribution',
+              accountId: CONTA_CORRENTE,
+              accountName: 'Conta corrente',
+              categoryId: 'cat-cdb',
+              categoryName: 'CDB',
+              amountCents: 200_000,
+              description: 'CDB Nubank',
+              source: 'import',
+            },
+          ],
+          nextCursor: null,
+        },
+      ],
+    }
+    // A foto de antes, desligada por valor: se a gravação escrever ali, a
+    // comparação acusa mesmo que o objeto seja outro.
+    const ANTES = JSON.parse(JSON.stringify(VISAO_DE_INVESTIMENTOS)) as unknown
+
+    servidor({
+      lancamentos: [
+        lancamento({
+          id: 'tx-aporte',
+          description: 'CDB Nubank',
+          amountCents: 200_000,
+          categoryId: 'cat-cdb',
+          categoryName: 'CDB',
+        }),
+      ],
+    })
+    // A chave literal, e não a fábrica de `features/investments`: import entre
+    // features é proibido, e aqui o literal é o próprio objeto do teste — é a
+    // forma da chave que precisa estar escrita.
+    const { queryClient } = renderLancamentos('/lancamentos?mes=2026-09', (cliente) => {
+      cliente.setQueryData(['transactions', 'investments', '2026-09'], VISAO_DE_INVESTIMENTOS)
+    })
+    await screen.findByText('CDB Nubank')
+
+    const { user, editor } = await abrirParaTrocar(/^CDB\. Trocar categoria de CDB Nubank/)
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-alimentacao')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText('Categoria trocada de CDB para Alimentação.'),
+    ).toBeInTheDocument()
+
+    // Intacto: a MESMA referência (a query nem foi visitada) e o mesmo
+    // conteúdo, campo a campo — inclusive o `flow`, que é o que some primeiro.
+    const depois = queryClient.getQueryData(['transactions', 'investments', '2026-09'])
+    expect(depois).toBe(VISAO_DE_INVESTIMENTOS)
+    expect(depois).toEqual(ANTES)
+    expect(JSON.stringify(depois)).toBe(JSON.stringify(ANTES))
+
+    // E a lista de lançamentos recebeu a linha nova no mesmo frame.
+    const linha = screen.getByText('CDB Nubank').closest('tr') as HTMLElement
+    expect(within(linha).getAllByText('Alimentação').length).toBeGreaterThan(0)
+  })
+
+  it('sob investimentos, trocar para uma categoria de despesa tira a linha e o toast explica', async () => {
+    servidor({
+      lancamentos: [
+        lancamento({
+          id: 'tx-aporte',
+          description: 'CDB Nubank',
+          amountCents: 200_000,
+          categoryId: 'cat-cdb',
+          categoryName: 'CDB',
+        }),
+      ],
+    })
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=investimentos')
+    await screen.findByText('CDB Nubank')
+
+    const { user, editor } = await abrirParaTrocar(/^CDB\. Trocar categoria de CDB Nubank/)
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-alimentacao')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    // Continua DE SUCESSO — nada falhou; e a linha não some em silêncio.
+    expect(
+      await screen.findByText(
+        'Categoria trocada de CDB para Alimentação. Ele saiu da lista: é uma despesa, e a lista mostra só aportes e resgates.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('com a categoria atual arquivada, o campo abre no placeholder e a nota diz por quê', async () => {
+    servidor({
+      lancamentos: [
+        lancamento({
+          id: 'tx-arq',
+          description: 'Mercado do seu José',
+          // A árvore ativa não traz esta categoria: marcação existente
+          // sobrevive ao arquivamento, atribuição nova não.
+          categoryId: 'cat-arquivada',
+          categoryName: 'Feira',
+        }),
+      ],
+    })
+    renderLancamentos()
+    await screen.findByText('Mercado do seu José')
+
+    const { editor } = await abrirParaTrocar(/^Feira\. Trocar categoria de Mercado do seu José/)
+    const campo = within(editor).getByRole('combobox')
+    expect(campo).toHaveValue('')
+    // O substantivo é explícito (`A categoria`) e nunca elíptico: nome injetado
+    // em frase não governa concordância — com a semente de fábrica, `Salário`
+    // produziria "está arquivada … escolhida" (docs/DESIGN.md (h) §2).
+    const nota = await within(editor).findByText(
+      'A categoria Feira está arquivada e não pode ser escolhida de novo.',
+    )
+    // C3: a frase existe para quem OUVE também. Quem chega ao campo pelo Tab
+    // precisa ouvir por que a categoria atual não está na lista — e o `Select`
+    // soma este id ao slot de mensagem dele, nunca o substitui.
+    expect(nota.id).not.toBe('')
+    expect(campo.getAttribute('aria-describedby')?.split(' ')).toContain(nota.id)
+    expect(campo).toHaveAccessibleDescription(
+      /A categoria Feira está arquivada e não pode ser escolhida de novo\./,
+    )
+    expect(within(editor).getByRole('button', { name: 'Escolha uma categoria' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// QA da emenda §19 (18/09/2026): o que o modo trocar deixou sem prova.
+//
+// A entrega cobriu o caminho feliz. O que falta é o que quebra primeiro: a
+// nota do grupo que GANHOU filhas (a outra metade do critério (h)), o 409 da
+// palavra que já é da categoria ANTERIOR — o caso mais frequente desta
+// emenda —, o foco que precisa PULAR as linhas categorizadas, as saídas de
+// lista sob `?tipo=` com o foco no vizinho, os erros do servidor que a UI só
+// pode mostrar genéricos (404 forjado, 429) e o nome de categoria hostil.
+// ---------------------------------------------------------------------------
+
+describe('AtalhoDeCategoria — QA da emenda §19', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    localStorage.clear()
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Critério (h), a metade que faltava: a nota diz QUAL dos dois motivos é.
+   *  Dizer "está arquivada" de um grupo que ganhou subcategorias mandaria a
+   *  pessoa procurar em Arquivadas uma categoria que está lá, ativa. */
+  it('a categoria atual virou grupo com subcategorias: a nota diz ISSO, e não "arquivada"', async () => {
+    servidor({
+      lancamentos: [
+        lancamento({
+          id: 'tx-grupo',
+          description: 'Corrida do centro',
+          // `grp-transporte` tem filha ativa (`cat-uber`): o seletor não o
+          // oferece mais (§13), mas a marcação antiga continua de pé.
+          categoryId: 'grp-transporte',
+          categoryName: 'Transporte',
+        }),
+      ],
+    })
+    renderLancamentos()
+    await screen.findByText('Corrida do centro')
+
+    const { editor } = await abrirParaTrocar(/^Transporte\. Trocar categoria de Corrida do centro/)
+    expect(within(editor).getByRole('combobox')).toHaveValue('')
+    expect(
+      await within(editor).findByText(
+        'O grupo Transporte tem subcategorias e não recebe lançamento. Escolha uma delas.',
+      ),
+    ).toBeInTheDocument()
+    // E nunca a frase do outro motivo: são dois estados diferentes do mundo.
+    expect(within(editor).queryByText(/está arquivada/)).not.toBeInTheDocument()
+    expect(within(editor).getByRole('button', { name: 'Escolha uma categoria' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+  })
+
+  /** O caso frequente desta emenda: a palavra que a pessoa escolhe para a
+   *  categoria NOVA é, muitas vezes, a que categorizou a linha na ANTERIOR —
+   *  foi ela que trouxe a linha até aqui. O servidor responde 409, e a §19
+   *  manda deixar tudo como estava. */
+  it('409 com a palavra da categoria ANTERIOR: nada mais é feito e o rótulo volta a Trocar categoria', async () => {
+    const { escritas } = servidor({
+      aoPatchCategoria: () =>
+        jsonResponse(409, {
+          error: {
+            code: 'KEYWORD_TAKEN',
+            message: 'keyword already used',
+            // A dona é a categoria de ONDE a linha está saindo.
+            fields: { keyword: 'x', ownerId: 'cat-alimentacao' },
+          },
+        }),
+    })
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    const select = within(editor).getByRole('combobox')
+    await user.selectOptions(select, 'cat-uber')
+    const [ficha] = within(editor).getAllByRole('button', { name: /^Reconhecer por «/ })
+    const palavra = (ficha as HTMLElement).textContent ?? ''
+    await user.click(ficha as HTMLElement)
+    await user.click(within(editor).getByRole('button', { name: /^Trocar e reconhecer por «/ }))
+
+    expect(await screen.findByText(`«${palavra}» já está em Alimentação.`)).toBeInTheDocument()
+    // SÓ (a) foi tentada: nem o PATCH do lançamento, nem o auto-categorize.
+    expect(escritas().map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'PATCH /categories/cat-uber',
+    ])
+    // Editor aberto, escolha mantida, ficha fora, verbo de volta ao de trocar.
+    expect(editor).toBeInTheDocument()
+    expect(select).toHaveValue('cat-uber')
+    expect(
+      within(editor).queryByRole('button', { name: `Reconhecer por «${palavra}»` }),
+    ).not.toBeInTheDocument()
+    const confirmar = within(editor).getByRole('button', { name: 'Trocar categoria' })
+    expect(confirmar).toHaveFocus()
+    // E a linha continua onde estava.
+    expect(screen.getAllByRole('button', { name: NOME_DA_CATEGORIZADA }).length).toBeGreaterThan(0)
+  })
+
+  /** Critério (e) no nível da TELA, com a linha categorizada NO MEIO — a
+   *  regressão mais fácil de introduzir. Antes da §19 todo botão da célula era
+   *  lacuna; hoje `data-atalho` está nos dois estados e só `data-lacuna`
+   *  distingue. Trocar um pelo outro faz o foco parar na linha que já tem
+   *  dona. */
+  it('a lacuna entre linhas categorizadas: o foco PULA a categorizada e vai à próxima lacuna', async () => {
+    servidor({
+      lancamentos: [
+        lancamento(),
+        lancamento({
+          id: 'tx-meio',
+          description: 'Pão de Açúcar',
+          categoryId: 'cat-alimentacao',
+          categoryName: 'Alimentação',
+        }),
+        lancamento({ id: 'tx-3', description: 'Farmácia Popular', amountCents: 3_250 }),
+      ],
+    })
+    renderLancamentos()
+    await screen.findByText('Mercado do seu José')
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-alimentacao')
+    await user.click(within(editor).getByRole('button', { name: 'Categorizar' }))
+
+    await screen.findByText('Lançamento categorizado como Alimentação.')
+    // A próxima PENDÊNCIA é `tx-3`, do outro lado da linha já categorizada.
+    await waitFor(() => expect(lacuna(NOME_DA_LACUNA_3)).toHaveFocus())
+    expect(document.activeElement).toHaveAttribute('data-atalho', 'tx-3')
+    expect(document.activeElement).toHaveAttribute('data-lacuna')
+  })
+
+  /** Critério (f) sob `investimentos`, a natureza que a §19 acrescentou: um
+   *  resgate que vira receita também sai da lista. */
+  it('sob investimentos, trocar um resgate para categoria de RECEITA tira a linha e o toast fala em receita', async () => {
+    servidor({
+      filtrarPorTipo: true,
+      lancamentos: [
+        lancamento({
+          id: 'tx-resgate',
+          kind: 'income',
+          description: 'Resgate CDB',
+          amountCents: 150_000,
+          categoryId: 'cat-resgates',
+          categoryName: 'Resgates',
+        }),
+      ],
+    })
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=investimentos')
+    await screen.findByText('Resgate CDB')
+
+    const { user, editor } = await abrirParaTrocar(/^Resgates\. Trocar categoria de Resgate CDB/)
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-salario')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText(
+        'Categoria trocada de Resgates para Salário. Ele saiu da lista: é uma receita, e a lista mostra só aportes e resgates.',
+      ),
+    ).toBeInTheDocument()
+    // E a linha SAIU de verdade — o servidor de mentira honra o `kindGroup`.
+    await waitFor(() => expect(screen.queryByText('Resgate CDB')).not.toBeInTheDocument())
+  })
+
+  /** Critério (f) sob `receitas` + o destino do foco quando a linha sai: o
+   *  vizinho da FOTO de antes, nunca o <body>. */
+  it('sob receitas, trocar para resgate tira a linha e o foco vai ao vizinho da foto', async () => {
+    servidor({
+      filtrarPorTipo: true,
+      lancamentos: [
+        lancamento({
+          id: 'tx-salario',
+          kind: 'income',
+          description: 'Salário de setembro',
+          amountCents: 900_000,
+          categoryId: 'cat-salario',
+          categoryName: 'Salário',
+        }),
+        lancamento({
+          id: 'tx-bonus',
+          kind: 'income',
+          description: 'Bônus anual',
+          amountCents: 300_000,
+          categoryId: 'cat-salario',
+          categoryName: 'Salário',
+        }),
+      ],
+    })
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=receitas')
+    await screen.findByText('Salário de setembro')
+
+    const { user, editor } = await abrirParaTrocar(
+      /^Salário\. Trocar categoria de Salário de setembro/,
+    )
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-resgates')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText(
+        'Categoria trocada de Salário para Resgates. Ele saiu da lista: é um resgate, e a lista mostra só receitas.',
+      ),
+    ).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Salário de setembro')).not.toBeInTheDocument())
+    // O foco não some com a linha: vai ao vizinho que estava na foto.
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('data-atalho', 'tx-bonus'))
+  })
+
+  /** A mesma saída, sem vizinho nenhum: o foco cai no <h1> (não há
+   *  `Carregar mais` — `nextCursor` é nulo). */
+  it('sob despesas, a única linha que sai leva o foco ao título', async () => {
+    servidor({
+      filtrarPorTipo: true,
+      lancamentos: [
+        lancamento({
+          id: 'tx-so',
+          description: 'Aporte disfarçado',
+          categoryId: 'cat-alimentacao',
+          categoryName: 'Alimentação',
+        }),
+      ],
+    })
+    renderLancamentos('/lancamentos?mes=2026-09&tipo=despesas')
+    await screen.findByText('Aporte disfarçado')
+
+    const { user, editor } = await abrirParaTrocar(
+      /^Alimentação\. Trocar categoria de Aporte disfarçado/,
+    )
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-cdb')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText(
+        'Categoria trocada de Alimentação para CDB. Ele saiu da lista: é um aporte, e a lista mostra só despesas.',
+      ),
+    ).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Lançamentos' })).toHaveFocus())
+  })
+
+  /** Abuso: `categoryId` forjado de outra casa. O servidor responde 404
+   *  genérico (igual ao inexistente — o teste de backend vive em
+   *  `updatecategory_abuso_test.go`); o que ESTA camada tem de provar é que a
+   *  tela não inventa detalhe e não fecha o editor sobre uma escrita que não
+   *  aconteceu. */
+  it('404 forjado no PATCH: mensagem genérica, editor aberto e a linha na categoria de antes', async () => {
+    servidor({
+      aoPatchLancamento: () =>
+        jsonResponse(404, { error: { code: 'NOT_FOUND', message: 'not found' } }),
+    })
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(await screen.findByText('Não encontramos esta página.')).toBeInTheDocument()
+    expect(editor).toBeInTheDocument()
+    expect(within(editor).getByRole('button', { name: 'Trocar categoria' })).toHaveFocus()
+    // A célula continua dizendo a verdade: a troca não aconteceu.
+    expect(screen.getAllByRole('button', { name: NOME_DA_CATEGORIZADA })).toHaveLength(2)
+  })
+
+  /** Abuso: rajada de recategorização até o 429 por casa. A tela mostra o
+   *  genérico do `messageForError` e deixa o editor aberto — a pessoa não
+   *  perde a escolha por causa de um limite temporário. */
+  it('429 na rajada: mensagem genérica de limite, editor aberto e escolha preservada', async () => {
+    const { escritas } = servidor({
+      aoPatchLancamento: () =>
+        jsonResponse(429, { error: { code: 'RATE_LIMITED', message: 'slow down' } }),
+    })
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    const select = within(editor).getByRole('combobox')
+    await user.selectOptions(select, 'cat-uber')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText('Muitas tentativas. Aguarde alguns minutos e tente de novo.'),
+    ).toBeInTheDocument()
+    expect(editor).toBeInTheDocument()
+    expect(select).toHaveValue('cat-uber')
+    // Uma tentativa, uma requisição: o erro não vira laço de repetição.
+    expect(escritas()).toHaveLength(1)
+  })
+
+  /** XSS: o nome da categoria é dado da casa, e entra na tela em três lugares
+   *  (filho, atributo e toast). Nos três é TEXTO — nunca HTML montado. */
+  it('nome de categoria hostil aparece como texto literal no botão, no aria-label e no toast', async () => {
+    const IMG = '<img src=x onerror="alert(1)">'
+    const SCRIPT = '<script>alert(1)</script>'
+    servidor({
+      categorias: {
+        expense: [
+          categoria({ id: 'cat-img', name: IMG, kind: 'expense' }),
+          categoria({ id: 'cat-script', name: SCRIPT, kind: 'expense' }),
+        ],
+        income: [],
+        investment: [],
+        redemption: [],
+      },
+      lancamentos: [
+        lancamento({
+          id: 'tx-xss',
+          description: 'Compra suspeita',
+          categoryId: 'cat-img',
+          categoryName: IMG,
+        }),
+      ],
+    })
+    renderLancamentos()
+    await screen.findByText('Compra suspeita')
+
+    const botoes = screen.getAllByRole('button', {
+      name: (nome: string) => nome.startsWith(`${IMG}. Trocar categoria de Compra suspeita,`),
+    })
+    expect(botoes).toHaveLength(2)
+    const [botao] = botoes as [HTMLButtonElement]
+    // Texto literal, e nenhum nó injetado.
+    expect(botao.textContent).toContain(IMG)
+    expect(botao.getAttribute('aria-label')).toContain(IMG)
+    expect(botao.querySelector('img')).toBeNull()
+
+    const user = userEvent.setup()
+    await user.click(botao)
+    const editor = await screen.findByRole('group', {
+      name: /^Trocar categoria de Compra suspeita/,
+    })
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-script')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+    expect(
+      await screen.findByText(`Categoria trocada de ${IMG} para ${SCRIPT}.`),
+    ).toBeInTheDocument()
+    // Nada virou nó: nem script, nem imagem com handler.
+    expect(document.querySelectorAll('script')).toHaveLength(0)
+    expect(document.querySelectorAll('img[onerror]')).toHaveLength(0)
+  })
+
+  /** Borda: trocar duas vezes sem recarregar. O `de X` do segundo toast tem de
+   *  ser a categoria NOVA — ler o `linha.categoryName` da renderização inicial
+   *  faria o app dizer "de Alimentação" pela segunda vez. */
+  it('trocar duas vezes seguidas: o segundo toast parte da categoria NOVA', async () => {
+    servidor({})
+    renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const primeira = await abrirParaTrocar()
+    await primeira.user.selectOptions(within(primeira.editor).getByRole('combobox'), 'cat-uber')
+    await primeira.user.click(
+      within(primeira.editor).getByRole('button', { name: 'Trocar categoria' }),
+    )
+    await screen.findByText('Categoria trocada de Alimentação para Uber.')
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('data-atalho', 'tx-ok'))
+
+    // Segunda troca, sem recarregar nada.
+    const segunda = await abrirParaTrocar(/^Uber\. Trocar categoria de Pão de Açúcar/)
+    // O editor reabre já na categoria ATUAL, que agora é a nova.
+    expect(within(segunda.editor).getByRole('combobox')).toHaveValue('cat-uber')
+    await segunda.user.selectOptions(within(segunda.editor).getByRole('combobox'), 'cat-padaria')
+    await segunda.user.click(
+      within(segunda.editor).getByRole('button', { name: 'Trocar categoria' }),
+    )
+
+    expect(await screen.findByText('Categoria trocada de Uber para Padaria.')).toBeInTheDocument()
+    expect(screen.queryByText(/trocada de Alimentação para Padaria/)).not.toBeInTheDocument()
+  })
+
+  /** Borda do contrato: `categoryId` presente com `categoryName` nulo. A linha
+   *  É categorizada — não pode virar pendência falsa —, mas não há nome para
+   *  mostrar nem para citar. */
+  it('categoryId com categoryName nulo não vira pendência: sem data-lacuna e com o verbo de trocar', async () => {
+    servidor({
+      lancamentos: [
+        lancamento({
+          id: 'tx-sem-nome',
+          description: 'Compra sem nome',
+          categoryId: 'cat-alimentacao',
+          categoryName: null,
+        }),
+      ],
+    })
+    renderLancamentos()
+    await screen.findByText('Compra sem nome')
+
+    const botoes = screen.getAllByRole('button', {
+      name: /^Sem categoria\. Trocar categoria de Compra sem nome/,
+    })
+    expect(botoes).toHaveLength(2)
+    // O texto é o mesmo buraco de sempre, mas o ESTADO é "categorizada".
+    expect(botoes[0]).not.toHaveAttribute('data-lacuna')
+    expect(document.querySelectorAll('button[data-lacuna]')).toHaveLength(0)
+
+    const { user, editor } = await abrirParaTrocar(
+      /^Sem categoria\. Trocar categoria de Compra sem nome/,
+    )
+    // Modo trocar de verdade: o campo abre na categoria atual e o confirmar
+    // recusa a mesma.
+    expect(within(editor).getByRole('combobox')).toHaveValue('cat-alimentacao')
+    expect(
+      within(editor).getByRole('button', { name: 'Escolha outra categoria' }),
+    ).toBeInTheDocument()
+
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+    // Sem a anterior resolvível, a frase ENCOLHE em vez de inventar um nome.
+    expect(await screen.findByText('Categoria trocada para Uber.')).toBeInTheDocument()
+  })
+
+  /** Borda: outra aba trocou a categoria enquanto o editor estava aberto. O
+   *  editor não pode gravar sobre premissa velha SEM SINAL — o campo intocado
+   *  acompanha o dado novo, e o toast conta a verdade de agora. */
+  it('a lista refetcha com a linha já em outra categoria: o editor acompanha e o toast não mente', async () => {
+    const backend = servidor({})
+    const { queryClient } = renderLancamentos()
+    await screen.findByText('Pão de Açúcar')
+
+    const { user, editor } = await abrirParaTrocar()
+    const select = within(editor).getByRole('combobox')
+    expect(select).toHaveValue('cat-alimentacao')
+
+    // Outra aba trocou para Uber; a invalidação traz a lista nova.
+    const alvo = backend.lancamentos.find((l) => l.id === 'tx-ok') as Record<string, unknown>
+    alvo.categoryId = 'cat-uber'
+    alvo.categoryName = 'Uber'
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+    })
+
+    // O SINAL: o campo intocado acompanha, e o confirmar recusa a mesma.
+    await waitFor(() => expect(select).toHaveValue('cat-uber'))
+    expect(
+      within(editor).getByRole('button', { name: 'Escolha outra categoria' }),
+    ).toBeInTheDocument()
+
+    await user.selectOptions(select, 'cat-padaria')
+    await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+    // A premissa do toast é a de AGORA, não a de quando o editor abriu.
+    expect(await screen.findByText('Categoria trocada de Uber para Padaria.')).toBeInTheDocument()
+  })
+
+  /** Borda: `?semCategoria=1`. Nenhuma linha categorizada aparece, então a
+   *  recategorização não é oferecida ali — e a linha que acabou de ser
+   *  categorizada não pode continuar contando como lacuna no cálculo do foco
+   *  (a "lacuna fantasma"). */
+  it('com ?semCategoria=1 não há controle de trocar, e a linha resolvida não vira lacuna fantasma', async () => {
+    servidor({
+      lancamentos: [
+        lancamento(),
+        lancamento({
+          id: 'tx-meio',
+          description: 'Pão de Açúcar',
+          categoryId: 'cat-alimentacao',
+          categoryName: 'Alimentação',
+        }),
+        lancamento({ id: 'tx-3', description: 'Farmácia Popular', amountCents: 3_250 }),
+      ],
+    })
+    renderLancamentos('/lancamentos?mes=2026-09&semCategoria=1')
+    await screen.findByText('Mercado do seu José')
+
+    // A categorizada não está na tela, logo não há o que trocar.
+    expect(screen.queryByText('Pão de Açúcar')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Trocar categoria de/ })).not.toBeInTheDocument()
+
+    const { user, editor } = await abrirEditor()
+    await user.selectOptions(within(editor).getByRole('combobox'), 'cat-alimentacao')
+    await user.click(within(editor).getByRole('button', { name: 'Categorizar' }))
+
+    await screen.findByText('Lançamento categorizado como Alimentação.')
+    await waitFor(() => expect(screen.queryByText('Mercado do seu José')).not.toBeInTheDocument())
+    // A resolvida sumiu da tela E da conta das lacunas — nada de fantasma.
+    expect(document.querySelectorAll('button[data-lacuna="tx-1"]')).toHaveLength(0)
+    await waitFor(() => expect(lacuna(NOME_DA_LACUNA_3)).toHaveFocus())
+  })
+
+  /** Borda: as DUAS instâncias do botão na mesma linha. Uma só é visível, e é
+   *  para ela que o foco vai depois de gravar. No jsdom não há layout, então o
+   *  teste define o `checkVisibility` que a tela consulta. */
+  it('com a instância da coluna escondida, o foco depois de gravar vai para a VISÍVEL', async () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'checkVisibility')
+    Object.defineProperty(HTMLElement.prototype, 'checkVisibility', {
+      configurable: true,
+      writable: true,
+      value(this: HTMLElement) {
+        return this.dataset.instancia !== 'coluna'
+      },
+    })
+    try {
+      servidor({})
+      renderLancamentos()
+      await screen.findByText('Pão de Açúcar')
+
+      const { user, editor } = await abrirParaTrocar()
+      await user.selectOptions(within(editor).getByRole('combobox'), 'cat-uber')
+      await user.click(within(editor).getByRole('button', { name: 'Trocar categoria' }))
+
+      await screen.findByText('Categoria trocada de Alimentação para Uber.')
+      await waitFor(() => expect(document.activeElement).toHaveAttribute('data-atalho', 'tx-ok'))
+      // A da coluna está escondida nesta faixa: o foco tem de ser o da linha
+      // secundária, e não um botão que ninguém vê.
+      expect(document.activeElement).toHaveAttribute('data-instancia', 'secundaria')
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, 'checkVisibility', original)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'checkVisibility')
+    }
   })
 })

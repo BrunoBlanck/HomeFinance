@@ -7,6 +7,7 @@ import { ChartIcon } from '@/components/icons/ChartIcon'
 import { CoinsIcon } from '@/components/icons/CoinsIcon'
 import { HouseIcon } from '@/components/icons/HouseIcon'
 import { LedgerIcon } from '@/components/icons/LedgerIcon'
+import { PromptIcon } from '@/components/icons/PromptIcon'
 import { TagsIcon } from '@/components/icons/TagsIcon'
 import { TransfersIcon } from '@/components/icons/TransfersIcon'
 import { WalletIcon } from '@/components/icons/WalletIcon'
@@ -80,6 +81,22 @@ const NAVEGACAO = [
   },
 ] as const
 
+/** O grupo **ferramentas** da lateral — o que a pessoa usa de vez em quando,
+ *  depois das seções de movimento e de cadastro, separado por um filete.
+ *
+ *  **Ferramenta não ocupa célula da barra inferior** (docs/DESIGN.md, spec 0010
+ *  §10.6(2)). A regra nasceu medida: a célula da barra é
+ *  `(viewport − 16 − (N − 1) × 2) / N`, e com N = 8 num viewport de 393px ela
+ *  cai a 45,4px — abaixo dos 47px que o rótulo exige. O piso só-ícone passaria
+ *  a valer em 390px de content box, e os rótulos de TODA a navegação apagariam
+ *  em praticamente todo celular em pé (360, 375, 390, 393, 412 px de viewport).
+ *  Um item novo não pode cobrar esse preço dos sete que já estavam lá.
+ *
+ *  Abaixo de 52rem estes itens somem da barra (`display: none` no `<li>`) e o
+ *  destino reaparece no `UserMenu` — que por isso passou a se chamar
+ *  `Menu de {nome}`, nas duas faixas: ele deixou de ser só a conta. */
+const FERRAMENTAS = [{ to: '/ia', label: 'IA', rotulo: 'IA', Icone: PromptIcon }] as const
+
 /** Casca do app autenticado: cabeçalho, navegação e o seletor de mês.
  *
  *  **O mês vive na URL** (`?mes=2026-09`) e é compartilhado entre as telas —
@@ -139,7 +156,10 @@ export function AppShell() {
           {session.data ? (
             <div className={styles.conta}>
               <span className={styles.casa}>{session.data.household.name}</span>
-              <UserMenu name={session.data.user.name} email={session.data.user.email} />
+              {/* O mês viaja para o menu porque abaixo de 52rem é ELE que
+                  hospeda o destino `/ia` — e um link do app que não leva o mês
+                  junto quebra o eixo do produto. */}
+              <UserMenu name={session.data.user.name} email={session.data.user.email} mes={mes} />
             </div>
           ) : (
             <div className={styles.conta} />
@@ -176,6 +196,25 @@ export function AppShell() {
                     // O nome acessível é o rótulo LIMPO: o hífen suave é
                     // detalhe de composição do texto visível e não pode vazar
                     // para o que é falado nem para o comando de voz.
+                    aria-label={label}
+                  >
+                    <Icone size={20} />
+                    <span className={styles.navRotulo}>{rotulo}</span>
+                  </Link>
+                </li>
+              ))}
+              {/* O grupo "ferramentas": mesmo `<ul>`, para a barra inferior
+                  continuar sendo UMA grade de colunas iguais, e um `<li>`
+                  marcado — é ele que leva o filete no desktop e o
+                  `display: none` no celular. */}
+              {FERRAMENTAS.map(({ to, label, rotulo, Icone }) => (
+                <li key={to} className={styles.navFerramenta}>
+                  <Link
+                    to={to}
+                    search={{ mes }}
+                    className={styles.navItem}
+                    activeOptions={{ exact: false, includeSearch: false }}
+                    activeProps={{ 'data-current': 'page', 'aria-current': 'page' }}
                     aria-label={label}
                   >
                     <Icone size={20} />

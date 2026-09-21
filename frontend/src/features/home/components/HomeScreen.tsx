@@ -1,38 +1,49 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
+import { validarBusca } from '@/app/search'
 import { FlashAlert } from '@/components/Alert/FlashAlert'
-import { ArrowRightIcon } from '@/components/icons/ArrowRightIcon'
-import { CheckIcon } from '@/components/icons/CheckIcon'
-import { Panel } from '@/components/Panel/Panel'
 import { Skeleton } from '@/components/Skeleton/Skeleton'
 import { isUnauthenticated } from '@/lib/errors'
+import { useFocoNoTitulo } from '@/lib/focus'
 import { firstName, formatFullDate } from '@/lib/format'
+import { FUSO_PADRAO, mesDaURL } from '@/lib/month'
 import { sessionQueryOptions } from '@/lib/session'
 import styles from './HomeScreen.module.css'
-import { LedgerPreview } from './LedgerPreview'
+import { MonthSummaryBand } from './MonthSummaryBand'
 
-const WORKING = [
-  'Criar conta com e-mail confirmado por código',
-  'Entrar e sair com sessão segura',
-  'Recuperar a senha pelo mesmo código de 6 dígitos',
-  'Contas e categorias da casa',
-]
-
-const NEXT = ['Lançamentos do mês', 'Contas que vencem', 'Orçamentos e relatórios']
-
+/** O painel (`/`) — a primeira tela de quem entra no app (spec 0008).
+ *
+ *  Duas coisas e nada mais: a saudação, que diz **hoje**, e a faixa de resumo,
+ *  que diz **o mês selecionado**. O `<h2>` da faixa é o que separa as duas.
+ *
+ *  **O resto da tela é vazio de propósito.** Saldo por conta, vencimentos e top
+ *  categorias são a E4 completa e estão fora desta entrega: nenhuma moldura
+ *  vazia, nenhum painel com "em breve", nenhum esqueleto permanente. A regra da
+ *  casca — item que não leva a lugar nenhum não é criado — vale igual para
+ *  bloco de tela.
+ *
+ *  **Sem seletor de mês próprio:** o mês é da casca (`?mes=` na URL), e um
+ *  segundo controle para a mesma coisa seria dois lugares para discordar. */
 export function HomeScreen() {
   const navigate = useNavigate()
   const flash = useRouterState({ select: (state) => state.location.state.flash })
-  const headingRef = useRef<HTMLHeadingElement>(null)
+  // Foco no <h1> na entrada da rota, igual às outras telas (docs/DESIGN.md).
+  const tituloRef = useFocoNoTitulo()
+
+  // Validada aqui, e não lida crua de `location.search`: é a fronteira entre a
+  // URL (que a pessoa edita) e a query da API.
+  const buscaBruta = useRouterState({ select: (estado) => estado.location.search })
+  const busca = validarBusca(buscaBruta as Record<string, unknown>)
+
   const session = useQuery(sessionQueryOptions)
+  // O mês corrente é o da CASA, nunca o do navegador (ADR-019): às 21h de 30 de
+  // setembro em São Paulo, o navegador de quem está em Lisboa já virou outubro.
+  const fuso = session.data?.household.timezone ?? FUSO_PADRAO
+  const mes = mesDaURL(busca.mes, fuso)
 
   useEffect(() => {
-    document.title = 'Início · HomeFinance'
-  }, [])
-
-  useEffect(() => {
-    headingRef.current?.focus()
+    document.title = 'Painel · HomeFinance'
   }, [])
 
   // Sessão vencida não é erro de tela: é hora de voltar para o login.
@@ -43,79 +54,37 @@ export function HomeScreen() {
   }, [session.isError, session.error, navigate])
 
   return (
-    <div className={styles.page}>
-      <div className={styles.body}>
-        {flash ? (
-          <div className={styles.flash}>
-            <FlashAlert flash={flash} />
-          </div>
+    <div className={styles.pagina}>
+      {flash ? <FlashAlert flash={flash} /> : null}
+
+      <section aria-busy={session.isPending || undefined}>
+        <h1 className={styles.titulo} ref={tituloRef} tabIndex={-1}>
+          {session.data ? (
+            `Olá, ${firstName(session.data.user.name)}.`
+          ) : session.isPending ? (
+            <>
+              <span className="sr-only">Carregando sua conta</span>
+              <Skeleton width="220px" height="1.75rem" />
+            </>
+          ) : (
+            'Olá.'
+          )}
+        </h1>
+
+        {/* A data é a de HOJE, e fica: a faixa abaixo fala do mês selecionado,
+            que pode ser março. Falha de sessão NÃO é reportada aqui — quem
+            avisa é a casca, que é quem depende dela. A saudação simplesmente
+            degrada para "Olá.". */}
+        {session.data ? (
+          <p className={styles.apoioDoTitulo}>{formatFullDate(new Date())}</p>
+        ) : session.isPending ? (
+          <p className={styles.apoioDoTitulo}>
+            <Skeleton width="180px" height="0.9375rem" />
+          </p>
         ) : null}
+      </section>
 
-        <section className={styles.greeting} aria-busy={session.isPending || undefined}>
-          <h1 className={styles.title} ref={headingRef} tabIndex={-1}>
-            {session.data ? (
-              `Olá, ${firstName(session.data.user.name)}.`
-            ) : session.isPending ? (
-              <>
-                <span className="sr-only">Carregando sua conta</span>
-                <Skeleton width="220px" height="1.75rem" />
-              </>
-            ) : (
-              'Olá.'
-            )}
-          </h1>
-
-          {session.isPending ? <Skeleton width="180px" height="0.9375rem" /> : null}
-          {session.data ? <p className={styles.date}>{formatFullDate(new Date())}</p> : null}
-          {/* Falha de sessão NÃO é reportada aqui: quem avisa é a casca, que é
-              quem depende da sessão. A saudação simplesmente degrada para
-              "Olá." — dois avisos para o mesmo problema é ruído. */}
-        </section>
-
-        <div className={styles.grid}>
-          <Panel padding="lg">
-            <h2 className={styles.panelTitle}>Seu caderno está em branco.</h2>
-            <p className={styles.panelText}>
-              Ainda não há nada registrado — e ainda não dá para registrar: os lançamentos entram na
-              próxima fase do projeto. Por enquanto, sua conta já está criada e com o e-mail
-              confirmado, que é o que garante que só você entra aqui.
-            </p>
-            <div className={styles.preview} aria-hidden="true">
-              <Panel tone="sunken" padding="md">
-                <LedgerPreview />
-              </Panel>
-            </div>
-          </Panel>
-
-          <Panel
-            as="section"
-            title="Onde o projeto está"
-            footer="Este app roda no seu servidor. Nenhum dado sai daqui."
-          >
-            <h3 className={styles.listTitle}>Já funciona</h3>
-            {/* biome-ignore lint/a11y/noRedundantRoles: o reset zera marcador e recuo justamente por [role=list]; sem ele o Safari descarta a semantica de lista */}
-            <ul className={styles.list} role="list">
-              {WORKING.map((item) => (
-                <li key={item}>
-                  <CheckIcon size={16} />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-
-            <h3 className={styles.listTitle}>A seguir</h3>
-            {/* biome-ignore lint/a11y/noRedundantRoles: o reset zera marcador e recuo justamente por [role=list]; sem ele o Safari descarta a semantica de lista */}
-            <ul className={styles.list} data-tone="next" role="list">
-              {NEXT.map((item) => (
-                <li key={item}>
-                  <ArrowRightIcon size={16} />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        </div>
-      </div>
+      <MonthSummaryBand mes={mes} />
     </div>
   )
 }

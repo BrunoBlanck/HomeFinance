@@ -529,3 +529,38 @@ func IsValidationError(err error) bool {
 func IsBlocked(err error) bool {
 	return errors.Is(err, ErrDuplicateDedup)
 }
+
+// validarParesCanonicos reconfere, sobre as linhas JÁ MONTADAS com os ids
+// canônicos, que nenhuma transferência ficou com as duas pernas na mesma
+// conta.
+//
+// É a segunda metade de validarPares, e existe porque as duas rodam sobre
+// dados diferentes: validarPares roda ANTES de qualquer consulta, sobre as
+// strings que o chamador mandou; esta roda DEPOIS da canonização, sobre o id
+// que o banco devolveu. Com a caixa do id trocada, `"<UUID>"` e `"<uuid>"` são
+// strings diferentes para o Go e a MESMA conta para o MySQL — o par passaria
+// pela primeira e só a segunda o pega.
+//
+// Confere SÓ a igualdade de conta: as outras invariantes do par (duas pernas,
+// uma de cada sentido, mesmo valor, mesmo dia) não dependem da identidade da
+// conta e já foram decididas antes, sobre dados que a canonização não toca.
+func validarParesCanonicos(linhas []Transaction) error {
+	grupos := map[string][]int{}
+	for i := range linhas {
+		if !linhas[i].IsTransfer() || linhas[i].TransferGroupID == nil {
+			continue
+		}
+		grupos[*linhas[i].TransferGroupID] = append(grupos[*linhas[i].TransferGroupID], i)
+	}
+	for _, indices := range grupos {
+		if len(indices) != 2 {
+			// Não deveria acontecer (validarPares já exigiu o par), e se
+			// acontecer o erro é o mesmo: meia transferência não existe.
+			return fmt.Errorf("%w: cada transferência tem exatamente duas pernas", ErrBrokenTransfer)
+		}
+		if linhas[indices[0]].AccountID == linhas[indices[1]].AccountID {
+			return fmt.Errorf("%w: origem e destino precisam ser contas diferentes", ErrBrokenTransfer)
+		}
+	}
+	return nil
+}

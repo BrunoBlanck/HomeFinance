@@ -252,6 +252,63 @@ func (r *AccountRepository) ReplaceKeywords(ctx context.Context, householdID, ac
 	return nil
 }
 
+// AppendKeywords ACRESCENTA palavras-chave à conta, na transação em curso,
+// sem apagar nada — o gêmeo de CategoryRepository.AppendKeywords, pelo mesmo
+// motivo de corrida (achado A2 da revisão da E9b): o DELETE de
+// ReplaceKeywords apagaria, em READ COMMITTED, uma palavra comitada por outra
+// transação entre a leitura e a escrita. Position continua a numeração lida
+// aqui; o teto por dona é reconferido contra COUNT(*) vivo. Ver o doc da irmã
+// sobre o que os testes com MaxOpenConns: 1 provam e o que fica para o
+// testcontainer de PostgreSQL.
+func (r *AccountRepository) AppendKeywords(ctx context.Context, householdID, accountID string, kws []account.Keyword) error {
+	if householdID == "" || accountID == "" {
+		return fmt.Errorf("acrescentar palavras-chave exige casa e conta")
+	}
+	if len(kws) == 0 {
+		return nil
+	}
+
+	models := make([]AccountKeyword, 0, len(kws))
+	for i := range kws {
+		k := kws[i]
+		if k.HouseholdID != "" && k.HouseholdID != householdID {
+			return fmt.Errorf("palavra-chave de outra casa na lista")
+		}
+		if k.AccountID != "" && k.AccountID != accountID {
+			return fmt.Errorf("palavra-chave de outra conta na lista")
+		}
+		if k.ID == "" || k.Keyword == "" || k.Norm == "" {
+			return fmt.Errorf("palavra-chave sem id, texto ou forma normalizada")
+		}
+		k.HouseholdID = householdID
+		k.AccountID = accountID
+		models = append(models, *toAccountKeywordModel(&k))
+	}
+
+	var atual keywordTally
+	err := r.keywordScope(ctx, householdID).
+		Where("account_id = ?", accountID).
+		Select(keywordTallyProjecao).
+		Scan(&atual).Error
+	if err != nil {
+		return fmt.Errorf("contando palavras-chave da conta: %w", err)
+	}
+	if atual.Total+int64(len(models)) > account.MaxKeywordsPerOwner {
+		return account.ErrTooManyKeywords
+	}
+	for i := range models {
+		models[i].Position = atual.MaxPosition + 1 + i
+	}
+
+	if err := r.conn(ctx).CreateInBatches(&models, keywordBatchSize).Error; err != nil {
+		if storage.IsDuplicate(err) {
+			return account.ErrKeywordTaken
+		}
+		return fmt.Errorf("acrescentando palavras-chave de conta: %w", err)
+	}
+	return nil
+}
+
 // DeleteKeywords apaga fisicamente as palavras-chave da conta.
 func (r *AccountRepository) DeleteKeywords(ctx context.Context, householdID, accountID string) error {
 	if householdID == "" || accountID == "" {

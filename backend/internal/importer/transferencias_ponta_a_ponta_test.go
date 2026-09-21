@@ -727,8 +727,12 @@ func TestTransferEmTransferenciaInternaComContraparteAlheiaResponde404ENadaEGrav
 	assert.Empty(t, a.lancamentosDa(t, a.alheia.ID, "2026-08"))
 	assert.Equal(t, importer.BatchStatusPending, revisarPelaAPI(t, a, lote.ID).Batch.Status)
 
+	// O id inexistente tem a FORMA canônica de UUID: desde a canonização de
+	// ids (18/09/2026) a borda recusa `counterpartAccountId` fora da forma com
+	// 400 no campo, e o que este caso precisa comparar é o 404 de "não é da
+	// minha casa" com o 404 de "não existe" — não a recusa de forma.
 	recInexistente := confirmarPelaAPI(t, a, lote.ID, fmt.Sprintf(
-		`{"decisions":[{"rowId":%q,"action":"transfer","counterpartAccountId":%q}]}`, linha.ID, a.proximoID("conta-inexistente")))
+		`{"decisions":[{"rowId":%q,"action":"transfer","counterpartAccountId":%q}]}`, linha.ID, a.proximoID("00000000-0000-7000-b000")))
 	assert.Equal(t, rec.Body.String(), recInexistente.Body.String())
 
 	// Contraparte igual à conta do lote é 400 com o campo.

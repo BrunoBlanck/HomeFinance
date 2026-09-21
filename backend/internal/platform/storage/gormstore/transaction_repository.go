@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/brunorblanck/homefinance/backend/internal/civil"
@@ -146,6 +147,100 @@ func (r *TransactionRepository) ByID(ctx context.Context, householdID, id string
 	return toTransactionEntity(&m), nil
 }
 
+// --- spec 0004 §12 (emenda E2d): filtro de tipo ----------------------------
+//
+// O predicado do `kindGroup` mora aqui, UMA vez, e é usado SÓ POR List.
+//
+// O `Summary` NÃO o usa, e isso é decisão registrada, não descuido: o resumo
+// tem de continuar dizendo quanto saiu para investimento mesmo sob o recorte
+// de despesas (ADR-029e, spec 0006 §3.5.2), então o `WHERE` dele é o mesmo
+// para as cinco opções e a distinção vive na projeção. Ver o comentário de
+// Summary e TestSummaryEmiteOMesmoSQLParaOsCincoGruposDeTipo.
+
+// aplicarGrupoDeTipo acrescenta à consulta o predicado do grupo pedido.
+//
+// O grupo é um valor de ALLOWLIST FECHADA (transaction.KindGroup*): ele
+// escolhe QUAL cláusula entra, e nunca vira texto de SQL. Os kinds vão por
+// placeholder `?` a partir de listas CONSTANTES no código, e os ids das
+// categorias marcadas vão por `IN ?`/`NOT IN ?`, que o GORM expande em
+// parâmetros.
+//
+// # Por que `category_id IS NULL OR` é OBRIGATÓRIO
+//
+// `NULL NOT IN (…)` avalia para NULL — não para verdadeiro — nos QUATRO
+// dialetos, porque é a lógica de três valores do SQL-92, e o WHERE só deixa
+// passar o que é VERDADEIRO. Sem o `IS NULL OR`, toda despesa SEM CATEGORIA
+// sumiria da aba "Despesas" — e sumiria em silêncio, com o total do resumo
+// caindo junto. É o defeito mais perigoso desta feature, e é ANSI: não há
+// dialeto em que a forma ingênua funcione, e não há dialeto em que esta
+// precise de variante.
+//
+// # Por que `investment` com conjunto vazio é ERRO
+//
+// Vazio não é "todas as categorias": seria a janela inteira devolvida como
+// se fosse investimento. É o mesmo ErrEmptyCategoryFilter de
+// ListByCategories, pelo mesmo motivo (ADR-029f), e quem chama faz o
+// curto-circuito em Go antes de chegar aqui. `IN ()` nunca é emitido.
+//
+// # Por que `income`/`expense` com conjunto vazio NÃO acrescenta cláusula
+//
+// Não há o que excluir: a casa não marca nada. A cláusula não entra, e o SQL
+// emitido volta a ser byte a byte o de antes do E2d — de novo, sem `IN ()`.
+func aplicarGrupoDeTipo(q *gorm.DB, grupo string, marcadas []string) (*gorm.DB, error) {
+	if grupo == "" {
+		return q, nil
+	}
+
+	ids := dedupeStrings(marcadas)
+	// O teto vale mesmo quando o conjunto não será usado (`transfer`): o que
+	// ele protege é o teto de PARÂMETROS por comando, e falhar alto e cedo é
+	// o desenho — ver maxCategoryFilterIDs.
+	if len(ids) > maxCategoryFilterIDs {
+		return nil, transaction.ErrTooManyCategories
+	}
+
+	switch grupo {
+	case transaction.KindGroupIncome, transaction.KindGroupExpense:
+		// O grupo COINCIDE com o kind da coluna nestes dois casos, mas o
+		// valor que vai ao banco é a constante do domínio, por placeholder.
+		kind := transaction.KindIncome
+		if grupo == transaction.KindGroupExpense {
+			kind = transaction.KindExpense
+		}
+		q = q.Where("kind = ?", kind)
+		if len(ids) > 0 {
+			// Os parênteses são NOSSOS, escritos no texto — não do ORM. O GORM
+			// também envolve um `OR` em parênteses, mas só quando há mais de
+			// uma cláusula no WHERE; sem eles, o `OR` se espalharia pelo WHERE
+			// inteiro e a consulta devolveria a casa toda, furando o
+			// `household_id`. Um invariante de isolamento entre casas não
+			// pode depender de um detalhe de implementação de biblioteca
+			// (achado baixo da revisão de segurança da E2d).
+			q = q.Where("(category_id IS NULL OR category_id NOT IN ?)", ids)
+		}
+		return q, nil
+
+	case transaction.KindGroupTransfer:
+		// As duas pernas, da lista CONSTANTE transferKinds. Transferência não
+		// tem categoria por desenho (ADR-016), então o conjunto marcado não
+		// entra: nem para incluir, nem para excluir.
+		return q.Where("kind IN ?", transferKinds), nil
+
+	case transaction.KindGroupInvestment:
+		if len(ids) == 0 {
+			return nil, transaction.ErrEmptyCategoryFilter
+		}
+		// `kind IN (income, expense)` não é redundância com o filtro de
+		// categoria: é o que garante que esta lista mostre EXATAMENTE as
+		// linhas que o resumo soma como aporte e resgate — mesma razão de
+		// ListByCategories.
+		return q.Where("kind IN ?", categorizableKinds).Where("category_id IN ?", ids), nil
+
+	default:
+		return nil, transaction.ErrUnknownKindGroup
+	}
+}
+
 // List devolve a página, da linha mais recente para a mais antiga.
 //
 // A ordenação é CONSTANTE no código, nunca vinda do cliente (armadilha P6 e
@@ -168,13 +263,32 @@ func (r *TransactionRepository) List(ctx context.Context, householdID string, f 
 	if f.StatementID != "" {
 		q = q.Where("statement_id = ?", f.StatementID)
 	}
+	// O recorte por categoria é filtro de JANELA, e entra junto dos outros:
+	// mesma posição na ordem dos parâmetros que ele ocupa no Summary, para os
+	// dois comandos contarem a mesma história. Ids por placeholder, com o
+	// mesmo teto dos demais conjuntos — um `IN (...)` sem teto é a consulta
+	// que o cliente escolhe o custo.
+	categorias := dedupeStrings(f.CategoryIDs)
+	if len(categorias) > maxCategoryFilterIDs {
+		return nil, fmt.Errorf("listando lançamentos: %w", transaction.ErrTooManyCategories)
+	}
+	if len(categorias) > 0 {
+		q = q.Where("category_id IN ?", categorias)
+	}
+	// O filtro de tipo entra JUNTO dos filtros de janela e ANTES do cursor: a
+	// ordem dos parâmetros do comando fica a mesma da do Summary, e o cursor
+	// continua sendo a última cláusula — a que muda de página para página.
+	q, err := aplicarGrupoDeTipo(q, f.KindGroup, f.InvestmentCategoryIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listando lançamentos: %w", err)
+	}
 	if f.Cursor != nil {
 		on := f.Cursor.OccurredOn.String()
 		q = q.Where("occurred_on < ? OR (occurred_on = ? AND id < ?)", on, on, f.Cursor.ID)
 	}
 
 	var rows []Transaction
-	err := q.Order("occurred_on DESC, id DESC").Limit(pageSize(f.Limit)).Find(&rows).Error
+	err = q.Order("occurred_on DESC, id DESC").Limit(pageSize(f.Limit)).Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("listando lançamentos: %w", err)
 	}
@@ -193,21 +307,35 @@ type summaryRow struct {
 	Cnt           int64
 	Total         int64
 	Uncategorized int64
-	// MarkedTotal é a parte de Total que está marcada como investimento
-	// (ADR-029). Vem da MESMA linha agregada, e é zero quando a casa não tem
-	// categoria de investimento — aí a coluna nem entra na consulta.
+	// MarkedTotal e MarkedCnt são a parte de Total e de Cnt que está marcada
+	// como investimento (ADR-029). Vêm da MESMA linha agregada, e são zero
+	// quando a casa não tem categoria de investimento — aí as colunas nem
+	// entram na consulta.
+	//
+	// MarkedCnt entrou com o filtro de tipo (spec 0004 §12, emenda E2d): é ele que
+	// permite ao serviço montar a CONTAGEM dos cinco recortes por aritmética
+	// sobre a mesma linha — `expense.Cnt − expense.MarkedCnt` é a contagem de
+	// "Despesas", `income.MarkedCnt + expense.MarkedCnt` a de
+	// "Investimentos". Sem ele seriam cinco consultas, que poderiam discordar
+	// entre si.
 	MarkedTotal int64
+	MarkedCnt   int64
 }
 
 // Projeção do Summary. As duas são CONSTANTES de compilação: a segunda é a
-// primeira mais uma coluna, e nenhum pedaço de nenhuma das duas vem de fora —
-// os ids entram por placeholder `?`, nunca no texto.
+// primeira mais duas colunas, e nenhum pedaço de nenhuma das duas vem de
+// fora — os ids entram por placeholder `?`, nunca no texto.
+//
+// A segunda tem DOIS `?`, e os dois recebem o MESMO conjunto: o dinheiro
+// marcado e a contagem marcada são perguntas diferentes sobre as MESMAS
+// linhas, e é por saírem da mesma varredura que elas não podem discordar.
 const (
 	summaryProjecao = "kind AS kind, COUNT(*) AS cnt, COALESCE(SUM(amount_cents), 0) AS total, " +
 		"SUM(CASE WHEN category_id IS NULL THEN 1 ELSE 0 END) AS uncategorized"
 
 	summaryProjecaoComMarcados = summaryProjecao +
-		", COALESCE(SUM(CASE WHEN category_id IN (?) THEN amount_cents ELSE 0 END), 0) AS marked_total"
+		", COALESCE(SUM(CASE WHEN category_id IN (?) THEN amount_cents ELSE 0 END), 0) AS marked_total" +
+		", SUM(CASE WHEN category_id IN (?) THEN 1 ELSE 0 END) AS marked_cnt"
 )
 
 // Summary agrega a MESMA janela da listagem em UMA consulta.
@@ -240,13 +368,42 @@ const (
 // escolhida entrega os mesmos quatro números por kind, com o mesmo plano de
 // hoje (`GROUP BY kind`), e é a única parametrizada.
 //
-// Com o conjunto VAZIO — o caso de toda casa no dia da entrega — a coluna
-// condicional NÃO entra na consulta: o SQL emitido é, byte a byte, o que era
+// Com o conjunto VAZIO — o caso de toda casa no dia da entrega — as colunas
+// condicionais NÃO entram na consulta: o SQL emitido é, byte a byte, o que era
 // emitido antes do E7, e `IN ()` não aparece em dialeto nenhum (ADR-029f).
+//
+// # O filtro de tipo NÃO entra aqui (spec 0004 §12, emenda E2d)
+//
+// O `WHERE` deste resumo é o MESMO para as cinco opções de `kindGroup`, e isso
+// é desenho, não esquecimento: `InvestedCents`/`RedeemedCents` não descrevem a
+// janela — descrevem o que SAIU de receita e despesa (ADR-029e) —, e é deles
+// que vive a frase "Fora destes números: R$ X em aportes" (spec 0006 §3.5.2).
+// Filtrar o resumo por tipo apagaria a explicação exatamente sob
+// `?tipo=despesas`, que é onde a omissão é maior.
+//
+// A distinção entre os cinco recortes vive na PROJEÇÃO (`marked_total` e
+// `marked_cnt` por kind) e na aritmética que o SERVIÇO faz sobre
+// Summary.ByKind. Uma consulta, cinco respostas que não podem discordar entre
+// si — cinco WHEREs diferentes poderiam, sob escrita concorrente.
+// TestSummaryEmiteOMesmoSQLParaOsCincoGruposDeTipo compara o comando EMITIDO
+// e existe para o dia em que alguém tentar mover isto de volta para o WHERE.
 func (r *TransactionRepository) Summary(ctx context.Context, householdID string, f transaction.SummaryFilter) (transaction.Summary, error) {
 	marcadas := dedupeStrings(f.InvestmentCategoryIDs)
 	if len(marcadas) > maxCategoryFilterIDs {
 		return transaction.Summary{}, fmt.Errorf("resumindo lançamentos: %w", transaction.ErrTooManyCategories)
+	}
+	// O grupo não vai ao SQL, mas é conferido ANTES dele: um valor fora da
+	// allowlist chegando aqui é defeito de ligação, e devolver o resumo como
+	// se nada fosse deixaria o serviço dobrar números sobre um recorte que
+	// ninguém sabe qual é. Defesa em profundidade — a borda já respondeu 400.
+	if !transaction.ValidKindGroup(f.KindGroup) {
+		return transaction.Summary{}, fmt.Errorf("resumindo lançamentos: %w", transaction.ErrUnknownKindGroup)
+	}
+	// Mesma regra de List, e UMA só para as duas: `investment` com conjunto
+	// vazio é erro, nunca "todas as categorias". Quem chama faz o
+	// curto-circuito em Go antes (ADR-029f).
+	if f.KindGroup == transaction.KindGroupInvestment && len(marcadas) == 0 {
+		return transaction.Summary{}, fmt.Errorf("resumindo lançamentos: %w", transaction.ErrEmptyCategoryFilter)
 	}
 
 	q := r.scope(ctx, householdID)
@@ -256,10 +413,23 @@ func (r *TransactionRepository) Summary(ctx context.Context, householdID string,
 	if f.AccountID != "" {
 		q = q.Where("account_id = ?", f.AccountID)
 	}
+	// Filtro de JANELA, como AccountID — e por isso ENTRA no WHERE, ao
+	// contrário do KindGroup (ver SummaryFilter.CategoryIDs). Vazio não
+	// acrescenta cláusula nenhuma: o comando emitido continua byte a byte o
+	// de antes nas requisições que não pedem categoria.
+	categorias := dedupeStrings(f.CategoryIDs)
+	if len(categorias) > maxCategoryFilterIDs {
+		return transaction.Summary{}, fmt.Errorf("resumindo lançamentos: %w", transaction.ErrTooManyCategories)
+	}
+	if len(categorias) > 0 {
+		q = q.Where("category_id IN ?", categorias)
+	}
 	if len(marcadas) == 0 {
 		q = q.Select(summaryProjecao)
 	} else {
-		q = q.Select(summaryProjecaoComMarcados, marcadas)
+		// O MESMO conjunto nos dois `?`: dinheiro marcado e contagem marcada
+		// são duas perguntas sobre as MESMAS linhas.
+		q = q.Select(summaryProjecaoComMarcados, marcadas, marcadas)
 	}
 
 	var rows []summaryRow
@@ -290,7 +460,25 @@ func (r *TransactionRepository) Summary(ctx context.Context, householdID string,
 		// receita nem despesa (ADR-016), e não tem categoria por desenho —
 		// contá-la como "sem categoria" viraria uma pendência que ninguém
 		// consegue resolver. E, sem categoria, ela também nunca é marcada.
+
+		// A linha CRUA também sai, para o serviço montar os cinco recortes do
+		// filtro de tipo por aritmética sobre estes mesmos números (E2d).
+		// Nada é derivado aqui: o que o banco devolveu é o que sobe.
+		out.ByKind = append(out.ByKind, transaction.SummaryKindTotals{
+			Kind:             row.Kind,
+			Count:            row.Cnt,
+			TotalCents:       row.Total,
+			Uncategorized:    row.Uncategorized,
+			MarkedTotalCents: row.MarkedTotal,
+			MarkedCount:      row.MarkedCnt,
+		})
 	}
+	// Ordem estável, feita em Go sobre no máximo 4 itens: a ordem em que o
+	// banco devolve os grupos é a última diferença de dialeto que sobraria
+	// aqui (collation), e o serviço não pode depender dela.
+	slices.SortFunc(out.ByKind, func(a, b transaction.SummaryKindTotals) int {
+		return strings.Compare(a.Kind, b.Kind)
+	})
 	out.NetCents = out.IncomeCents - out.ExpenseCents
 	return out, nil
 }

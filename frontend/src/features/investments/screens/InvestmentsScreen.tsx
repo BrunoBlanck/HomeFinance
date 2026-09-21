@@ -55,7 +55,14 @@ type Totais = {
  *     gráfico (`--chart-1` e `--chart-3`, nunca 1 e 2).
  *  3. **Nada de derivado.** Sem líquido, sem saldo investido, sem variação
  *     contra o mês anterior, sem projeção. Quem quer saber "quanto eu tenho"
- *     está na tela errada, e a tela não finge o contrário. */
+ *     está na tela errada, e a tela não finge o contrário.
+ *
+ *     ⚠️ Escopo: isto vale AQUI, e continua valendo por decisão explícita do
+ *     usuário em 18/09/2026. O **painel** (`/`) mostra, desde a mesma data, o
+ *     investimento do mês como UM líquido com sinal (aportes − resgates,
+ *     podendo ser negativo): ele responde "quanto ficou investido neste
+ *     mês", esta tela responde "quanto entrou e quanto saiu". Ver
+ *     `LICOES-FRONTEND.md`. */
 export function InvestmentsScreen() {
   const navigate = useNavigate()
   const tituloRef = useRef<HTMLHeadingElement>(null)

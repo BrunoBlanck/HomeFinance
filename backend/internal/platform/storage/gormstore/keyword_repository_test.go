@@ -259,3 +259,132 @@ func TestKeywordOwnersFatiaListasGrandes(t *testing.T) {
 		assert.Equal(t, map[string]string{"supermercado": cat.ID}, donas)
 	})
 }
+
+// --- AppendKeywords (spec 0010 §10.4, achado A2 da revisão da E9b) --------------------
+
+// AppendKeywords ACRESCENTA: o que já estava na dona fica, a numeração de
+// Position continua do maior valor lido no banco (não da lista do chamador),
+// e a lista de outra dona não é tocada. É o contrário de ReplaceKeywords —
+// e é por não ter DELETE que uma palavra comitada por outra transação entre a
+// leitura e a escrita não some.
+func TestAppendKeywordsAcrescentaSemApagarEContinuaANumeracao(t *testing.T) {
+	t.Parallel()
+
+	eachBackend(t, func(t *testing.T, s *store) {
+		ctx := t.Context()
+		minha, _ := s.duasCasas(t, ctx)
+		cat := s.makeCategory(t, ctx, minha.ID, "Transporte", category.KindExpense, nil)
+		outra := s.makeCategory(t, ctx, minha.ID, "Lazer", category.KindExpense, nil)
+		conta := s.makeAccount(t, ctx, minha.ID, "Nubank")
+
+		// Estado inicial com um BURACO na numeração (0 e 5): o próximo é 6,
+		// não len(lista).
+		require.NoError(t, s.categories.ReplaceKeywords(ctx, minha.ID, cat.ID, []category.Keyword{
+			s.kw("uber", 0), s.kw("99 pop", 5),
+		}))
+		require.NoError(t, s.categories.ReplaceKeywords(ctx, minha.ID, outra.ID, []category.Keyword{s.kw("cinema", 0)}))
+		require.NoError(t, s.accounts.ReplaceKeywords(ctx, minha.ID, conta.ID, []account.Keyword{s.akw("nubank", 0)}))
+
+		// A Position do chamador é IGNORADA: o banco numera.
+		require.NoError(t, s.uow.Do(ctx, func(ctx context.Context) error {
+			return s.categories.AppendKeywords(ctx, minha.ID, cat.ID, []category.Keyword{
+				s.kw("metrô", 0), s.kw("ônibus", 1),
+			})
+		}))
+		require.NoError(t, s.accounts.AppendKeywords(ctx, minha.ID, conta.ID, []account.Keyword{s.akw("nu pagamentos", 0)}))
+
+		lista, err := s.categories.ListKeywords(ctx, minha.ID)
+		require.NoError(t, err)
+		var doTransporte []string
+		var posicoes []int
+		for _, k := range lista {
+			if k.CategoryID == cat.ID {
+				doTransporte = append(doTransporte, k.Keyword)
+				posicoes = append(posicoes, k.Position)
+			}
+		}
+		assert.Equal(t, []string{"uber", "99 pop", "metrô", "ônibus"}, doTransporte, "nada apagado; as novas no fim")
+		assert.Equal(t, []int{0, 5, 6, 7}, posicoes, "continua do maior Position lido")
+
+		donas, err := s.categories.KeywordOwners(ctx, minha.ID, []string{"cinema", "metro"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"cinema": outra.ID, "metro": cat.ID}, donas, "a outra dona não é tocada")
+
+		contas, err := s.accounts.ListKeywords(ctx, minha.ID)
+		require.NoError(t, err)
+		require.Len(t, contas, 2)
+		assert.Equal(t, []int{0, 1}, []int{contas[0].Position, contas[1].Position})
+
+		// Lista vazia é no-op — nem DELETE, nem INSERT.
+		require.NoError(t, s.categories.AppendKeywords(ctx, minha.ID, cat.ID, nil))
+		lista, err = s.categories.ListKeywords(ctx, minha.ID)
+		require.NoError(t, err)
+		assert.Len(t, lista, 5)
+	})
+}
+
+// A colisão é decidida pelo ÍNDICE ÚNICO — de outra dona ou da própria —, e o
+// teto por dona é reconferido contra o COUNT(*) vivo, não contra o que o
+// chamador acha que existe.
+func TestAppendKeywordsRecusaColisaoETetoPeloBanco(t *testing.T) {
+	t.Parallel()
+
+	eachBackend(t, func(t *testing.T, s *store) {
+		ctx := t.Context()
+		minha, _ := s.duasCasas(t, ctx)
+		cat := s.makeCategory(t, ctx, minha.ID, "Transporte", category.KindExpense, nil)
+		outra := s.makeCategory(t, ctx, minha.ID, "Lazer", category.KindExpense, nil)
+		conta := s.makeAccount(t, ctx, minha.ID, "Nubank")
+
+		require.NoError(t, s.categories.ReplaceKeywords(ctx, minha.ID, cat.ID, []category.Keyword{s.kw("uber", 0)}))
+		require.NoError(t, s.categories.ReplaceKeywords(ctx, minha.ID, outra.ID, []category.Keyword{s.kw("cinema", 0)}))
+		require.NoError(t, s.accounts.ReplaceKeywords(ctx, minha.ID, conta.ID, []account.Keyword{s.akw("nubank", 0)}))
+
+		// Palavra de OUTRA dona: ErrKeywordTaken, e nada da lista entra —
+		// a transação do chamador desfaz o resto.
+		err := s.uow.Do(ctx, func(ctx context.Context) error {
+			return s.categories.AppendKeywords(ctx, minha.ID, cat.ID, []category.Keyword{s.kw("metrô", 0), s.kw("CINEMA", 1)})
+		})
+		require.ErrorIs(t, err, category.ErrKeywordTaken)
+		// Palavra da PRÓPRIA dona também colide: acrescentar não é "garantir
+		// presença", e quem chama já pulou as que existem (already_present).
+		err = s.uow.Do(ctx, func(ctx context.Context) error {
+			return s.categories.AppendKeywords(ctx, minha.ID, cat.ID, []category.Keyword{s.kw("Uber", 0)})
+		})
+		require.ErrorIs(t, err, category.ErrKeywordTaken)
+		err = s.uow.Do(ctx, func(ctx context.Context) error {
+			return s.accounts.AppendKeywords(ctx, minha.ID, conta.ID, []account.Keyword{s.akw("NUBANK", 0)})
+		})
+		require.ErrorIs(t, err, account.ErrKeywordTaken)
+
+		lista, err := s.categories.ListKeywords(ctx, minha.ID)
+		require.NoError(t, err)
+		assert.Len(t, lista, 2, "a transação desfeita não deixou 'metrô' pela metade")
+
+		// Teto: 1 existente + 20 novas passa de MaxKeywordsPerOwner.
+		vinte := make([]category.Keyword, 0, 20)
+		for i := range 20 {
+			vinte = append(vinte, s.kw(fmt.Sprintf("palavra %c", 'a'+i), i))
+		}
+		err = s.uow.Do(ctx, func(ctx context.Context) error {
+			return s.categories.AppendKeywords(ctx, minha.ID, cat.ID, vinte)
+		})
+		require.ErrorIs(t, err, category.ErrTooManyKeywords)
+		// 1 + 19 cabe exatamente.
+		require.NoError(t, s.uow.Do(ctx, func(ctx context.Context) error {
+			return s.categories.AppendKeywords(ctx, minha.ID, cat.ID, vinte[:19])
+		}))
+		lista, err = s.categories.ListKeywords(ctx, minha.ID)
+		require.NoError(t, err)
+		assert.Len(t, lista, 21) // 20 do Transporte + 1 do Lazer
+
+		// Recusa antes de qualquer SQL o que o serviço não deveria mandar.
+		deOutra := s.kw("x", 0)
+		deOutra.CategoryID = outra.ID
+		require.Error(t, s.categories.AppendKeywords(ctx, minha.ID, cat.ID, []category.Keyword{deOutra}))
+		semNorm := s.kw("y", 0)
+		semNorm.Norm = ""
+		require.Error(t, s.categories.AppendKeywords(ctx, minha.ID, cat.ID, []category.Keyword{semNorm}))
+		require.Error(t, s.categories.AppendKeywords(ctx, "", cat.ID, []category.Keyword{s.kw("z", 0)}))
+	})
+}

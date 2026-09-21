@@ -201,9 +201,11 @@ func NewService(
 
 // ListInput é a janela pedida pelo cliente.
 //
-// Nesta entrega o filtro é month + accountId e mais nada (spec 0004 §1.2):
-// categoria, tipo, busca e faixa de valor entram na E2b. Um filtro a menos é
-// uma consulta a menos para revisar.
+// O filtro é month + accountId + kindGroup + categoryId e mais nada (spec 0004
+// §1.2 e §1.6): busca por descrição, faixa de valor e ordenação entram na E2b.
+// Um filtro a menos é uma consulta a menos para revisar — e `sort`, em
+// particular, é ordenação vinda do cliente, que sem allowlist é injeção com
+// outro nome.
 type ListInput struct {
 	// Month é "YYYY-MM" e é OBRIGATÓRIO. Sem ele a consulta viraria "todos os
 	// lançamentos da casa", que é a página que fica lenta primeiro e a que
@@ -216,7 +218,35 @@ type ListInput struct {
 	// AccountID é opcional; vazio quer dizer "todas as contas da casa".
 	AccountID string
 
+	// KindGroup é o recorte por TIPO (spec 0004 §12, emenda E2d), da
+	// allowlist FECHADA KindGroup*. Vazio é "Tudo" — não existe o valor
+	// `all`.
+	//
+	// Ele recorta a LISTA (predicado no WHERE) e o RESUMO (aritmética em Go
+	// sobre Summary.ByKind, nunca um WHERE diferente). O valor é conferido na
+	// borda, de novo aqui e de novo no repositório: ele escolhe qual cláusula
+	// entra na consulta e jamais vira texto de SQL.
+	KindGroup string
+
+	// CategoryID é o recorte por CATEGORIA — o atalho "Ver lançamentos" do
+	// relatório por categoria. Vazio quer dizer "todas".
+	//
+	// GRUPO INCLUI AS FILHAS: pedir uma categoria de nível 1 traz os
+	// lançamentos dela e os das subcategorias, arquivadas incluídas. É o
+	// conjunto que a linha do grupo soma em GET /reports/by-category, e é o
+	// que faz o atalho entre as duas telas mostrar o mesmo dinheiro — trazer
+	// só o que foi lançado direto no grupo abriria a lista num subconjunto do
+	// número em que a pessoa clicou.
+	//
+	// A categoria é conferida como sendo DA CASA antes de virar filtro: id de
+	// outra casa é 404, igual ao inexistente, como em AccountID (S1).
+	CategoryID string
+
 	// Cursor é a forma textual devolvida pela página anterior.
+	//
+	// O cursor é POSIÇÃO, não filtro: reenviá-lo com outro KindGroup devolve
+	// uma página do filtro novo a partir daquela posição. Quem troca de filtro
+	// descarta o cursor — é o contrato publicado.
 	Cursor string
 
 	// Limit é o tamanho da página; zero usa DefaultPageSize.
@@ -233,14 +263,41 @@ func (s *Service) List(ctx context.Context, ator Actor, in ListInput) (ListView,
 		return ListView{}, err
 	}
 
+	// Allowlist do filtro de tipo, de novo (a borda já recusou): grupo
+	// desconhecido falha FECHADO, nunca é tratado como "sem filtro". Tratá-lo
+	// como "tudo" devolveria a janela INTEIRA para quem pediu um recorte —
+	// o modo silencioso de vazar exatamente o que o filtro existia para
+	// esconder. O erro não carrega o valor recebido.
+	if !ValidKindGroup(in.KindGroup) {
+		return ListView{}, fmt.Errorf("%w: na listagem", ErrUnknownKindGroup)
+	}
+
 	// A conta do filtro é conferida como sendo DA CASA. Sem isto, pedir a conta
 	// da vizinha devolveria uma lista vazia — o que não vaza dado, mas também
 	// não é a resposta certa: id que não é meu é 404, igual a id que não
 	// existe (S1).
+	//
+	// E o que segue para a consulta é o id CANÔNICO, nunca o que o cliente
+	// mandou: o `ByID` casa por COLLATION (no MySQL 8, `utf8mb4_0900_ai_ci`
+	// ignora a caixa), então o filtro pode ser aceito com uma grafia que as
+	// comparações em Go do resto do serviço — o nome da conta, o recorte por
+	// grupo — não reconheceriam.
+	contaDoFiltro := in.AccountID
 	if in.AccountID != "" {
-		if _, err := s.contaDaCasa(ctx, householdID, in.AccountID); err != nil {
+		conta, err := s.contaDaCasa(ctx, householdID, in.AccountID)
+		if err != nil {
 			return ListView{}, err
 		}
+		contaDoFiltro = conta.ID
+	}
+
+	// A categoria do filtro passa pela MESMA porta da conta: id que não é da
+	// casa é 404, nunca lista vazia (S1). O que segue para a consulta são os
+	// ids CANÔNICOS do banco — o do grupo mais os das filhas —, nunca a
+	// grafia que o cliente mandou.
+	categoriasDoFiltro, err := s.recorteDeCategoria(ctx, householdID, in.CategoryID)
+	if err != nil {
+		return ListView{}, err
 	}
 
 	cursor, err := ParseCursor(in.Cursor)
@@ -250,7 +307,9 @@ func (s *Service) List(ctx context.Context, ator Actor, in ListInput) (ListView,
 
 	filtro := ListFilter{
 		CompetenceMonth: in.Month,
-		AccountID:       in.AccountID,
+		AccountID:       contaDoFiltro,
+		KindGroup:       in.KindGroup,
+		CategoryIDs:     categoriasDoFiltro,
 	}
 	if !cursor.OccurredOn.IsZero() {
 		filtro.Cursor = &cursor
@@ -281,24 +340,148 @@ func (s *Service) List(ctx context.Context, ator Actor, in ListInput) (ListView,
 		return ListView{}, fmt.Errorf("%w: %d categorias marcadas", ErrTooManyCategories, len(rot.marcadas))
 	}
 
+	// CURTO-CIRCUITO obrigatório (ADR-029f): "Investimentos" numa casa que não
+	// marca NENHUMA categoria é resposta vazia, resolvida aqui, em Go, ANTES
+	// de tocar o banco.
+	//
+	// Sem ele, o conjunto vazio desceria para o repositório, que responde
+	// ErrEmptyCategoryFilter — de propósito, porque `IN ()` não existe e
+	// "vazio = todas as categorias" devolveria o mês inteiro como se fosse
+	// investimento —, e o handler traduziria isso em 500 genérico. Ou seja:
+	// TODA casa sem categoria de investimento tomaria 500 nesta aba, que é o
+	// estado de toda casa no dia da entrega.
+	//
+	// Cobre a requisição INTEIRA — lista e resumo —, e não só a lista: pedir
+	// o resumo aqui daria o mesmo 500 pelo outro caminho. Os dois campos de
+	// reconciliação vêm zero porque são zero mesmo: sem categoria marcada não
+	// há aporte nem resgate para descontar.
+	//
+	// O erro do repositório CONTINUA existindo: ele é a defesa em
+	// profundidade para o dia em que outro chamador esquecer este atalho.
+	if in.KindGroup == KindGroupInvestment && len(rot.marcadas) == 0 {
+		return ListView{Items: []View{}, NextCursor: nil, Summary: SummaryView{}}, nil
+	}
+	filtro.InvestmentCategoryIDs = rot.marcadas
+
 	linhas, proximo, err := s.paginaBruta(ctx, householdID, filtro, in.Limit)
 	if err != nil {
 		return ListView{}, err
 	}
 
+	// O resumo vai SEM recorte de tipo no WHERE: o grupo viaja só para o
+	// repositório recusar o que está fora da allowlist. A distinção entre as
+	// cinco opções é feita logo abaixo, por aritmética sobre a MESMA leitura
+	// (ver recortarResumo).
 	resumo, err := s.repo.Summary(ctx, householdID, SummaryFilter{
-		CompetenceMonth:       in.Month,
-		AccountID:             in.AccountID,
+		CompetenceMonth: in.Month,
+		AccountID:       contaDoFiltro,
+		KindGroup:       in.KindGroup,
+		// O recorte por categoria vai junto: ele é janela, e o resumo fala
+		// da MESMA janela da lista. Sem ele aqui, a tela mostraria os totais
+		// do mês inteiro embaixo das linhas de uma categoria só.
+		CategoryIDs:           categoriasDoFiltro,
 		InvestmentCategoryIDs: rot.marcadas,
 	})
 	if err != nil {
 		return ListView{}, fmt.Errorf("resumindo lançamentos: %w", err)
 	}
-	if err := conferirResumo(resumo, len(rot.marcadas)); err != nil {
+	recorte, err := recortarResumo(resumo, in.KindGroup)
+	if err != nil {
+		return ListView{}, err
+	}
+	// A conferência roda sobre o que VAI SER PUBLICADO, e não sobre o que o
+	// banco devolveu: é o número que chega à tela que precisa ser defensável.
+	// As parcelas cruas continuam sob os olhos dela — recortarResumo preserva
+	// ByKind, e é lá que `0 ≤ marcado ≤ total` é verificado por kind.
+	if err := conferirResumo(recorte, in.KindGroup, len(rot.marcadas)); err != nil {
 		return ListView{}, err
 	}
 
-	return ListView{Items: montarViews(linhas, rot), NextCursor: proximo, Summary: toSummaryView(resumo)}, nil
+	return ListView{Items: montarViews(linhas, rot), NextCursor: proximo, Summary: toSummaryView(recorte)}, nil
+}
+
+// recortarResumo dobra, EM GO, o resumo da janela no recorte pedido — a
+// segunda metade do desenho cujo primeiro passo é "o SQL do resumo é o mesmo
+// para as cinco opções" (ver SummaryFilter.KindGroup e o comentário de
+// Summary no gormstore).
+//
+// Uma leitura, cinco respostas que não podem discordar entre si. Cinco WHEREs
+// diferentes poderiam: bastaria uma escrita entrar entre duas consultas para
+// a soma dos recortes deixar de fechar com o total.
+//
+// ⚠️ InvestedCents e RedeemedCents atravessam o recorte INTACTOS, nas cinco
+// opções. Eles não descrevem a janela — descrevem o que SAIU de
+// ExpenseCents/IncomeCents (ADR-029e) — e alimentam a frase "Fora destes
+// números: R$ X em aportes" (spec 0006 §3.5.2). Zerá-los sob o recorte de
+// despesas apagaria a explicação exatamente onde a omissão é maior.
+//
+// ⚠️ Uncategorized sai APENAS de `income` e `expense` — a de cada recorte é a
+// do seu próprio kind, e é ZERO em `transfer` e `investment`. Isso foi MEDIDO,
+// não suposto: em ByKind as pernas de transferência trazem Uncategorized IGUAL
+// a Count, porque transferência nunca tem categoria (ADR-016) e toda perna
+// casa com `category_id IS NULL` na projeção crua. Usar a linha crua da perna
+// faria a tela pedir que a pessoa categorizasse transferências, que não têm
+// categoria para receber.
+//
+// O dinheiro vem dos campos JÁ AGREGADOS (IncomeCents/ExpenseCents), que o
+// repositório devolve líquidos do marcado; das linhas cruas vêm só as
+// CONTAGENS, que não existem prontas. Recalcular o dinheiro aqui criaria uma
+// segunda fórmula para o mesmo número.
+func recortarResumo(s Summary, grupo string) (Summary, error) {
+	if grupo == "" {
+		return s, nil
+	}
+
+	porKind := make(map[string]SummaryKindTotals, len(s.ByKind))
+	for _, k := range s.ByKind {
+		porKind[k.Kind] = k
+	}
+	receita, despesa := porKind[KindIncome], porKind[KindExpense]
+
+	out := Summary{
+		InvestedCents: s.InvestedCents,
+		RedeemedCents: s.RedeemedCents,
+		ByKind:        s.ByKind,
+	}
+	switch grupo {
+	case KindGroupIncome:
+		// Receitas SEM os resgates: o dinheiro já vem líquido do repositório,
+		// e a contagem desconta as linhas marcadas da mesma leitura.
+		out.Count = receita.Count - receita.MarkedCount
+		out.IncomeCents = s.IncomeCents
+		out.Uncategorized = receita.Uncategorized
+
+	case KindGroupExpense:
+		// Despesas SEM os aportes. A despesa sem categoria continua aqui — é
+		// ela que o `category_id IS NULL OR …` do repositório preserva, e é
+		// ela que este Uncategorized conta.
+		out.Count = despesa.Count - despesa.MarkedCount
+		out.ExpenseCents = s.ExpenseCents
+		out.Uncategorized = despesa.Uncategorized
+
+	case KindGroupTransfer:
+		// As DUAS pernas: cada uma é uma linha da lista. Receita, despesa e
+		// pendência são zero por desenho — transferência não é receita nem
+		// despesa (ADR-016) e não tem categoria para receber.
+		out.Count = porKind[KindTransferOut].Count + porKind[KindTransferIn].Count
+
+	case KindGroupInvestment:
+		// Aportes (despesa marcada) + resgates (receita marcada). Pendência é
+		// zero: aporte e resgate têm categoria por definição — é ela que os
+		// marca.
+		out.Count = receita.MarkedCount + despesa.MarkedCount
+
+	default:
+		// Inalcançável: List e o repositório já recusaram o que está fora da
+		// allowlist. Fica fechado mesmo assim — devolver `s` aqui seria
+		// publicar a janela inteira sob um recorte desconhecido.
+		return Summary{}, fmt.Errorf("%w: ao recortar o resumo", ErrUnknownKindGroup)
+	}
+
+	// A identidade é RECONSTITUÍDA, nunca herdada: os dois operandos acabaram
+	// de mudar, e conferirResumo a verifica logo em seguida.
+	out.NetCents = out.IncomeCents - out.ExpenseCents
+	return out, nil
 }
 
 // errResumoInconsistente — o resumo voltou do banco com uma parcela NEGATIVA,
@@ -338,11 +521,66 @@ var errResumoInconsistente = errors.New("resumo do mês fora da faixa publicáve
 // A mensagem leva só CONTAGENS. Centavos não entram em log (S8), e nem a
 // descrição do lançamento: o diagnóstico que interessa é "quantas linhas e
 // quantas categorias marcadas havia na janela", não quanto dinheiro era.
-func conferirResumo(s Summary, marcadas int) error {
-	if s.IncomeCents < 0 || s.ExpenseCents < 0 || s.InvestedCents < 0 || s.RedeemedCents < 0 ||
-		s.Count < 0 || s.Uncategorized < 0 {
+//
+// A partir da emenda E2d a conferência cobre também o RECORTE por tipo. A
+// tabela completa do que é verificado:
+//
+//	| condição                                        | vale para           |
+//	|-------------------------------------------------|---------------------|
+//	| as seis parcelas ≥ 0                            | sempre              |
+//	| NetCents == IncomeCents − ExpenseCents          | sempre              |
+//	| 0 ≤ marcado ≤ total, por kind (valor e contagem)| sempre              |
+//	| ExpenseCents == 0                               | income              |
+//	| IncomeCents == 0                                | expense             |
+//	| receita, despesa e pendência == 0               | transfer/investment |
+//
+// InvestedCents e RedeemedCents NÃO têm invariante por grupo: eles não
+// dependem do grupo, e é justamente disso que vive a frase "Fora destes
+// números" (ADR-029e). Exigir zero deles em algum recorte seria codificar o
+// contrário do contrato publicado.
+//
+// A linha por kind é o que impede o recorte de MASCARAR corrupção: sob
+// `transfer` a receita publicada é zero por construção, então uma receita
+// crua negativa passaria despercebida se só o número publicado fosse
+// conferido. Ela é conferida na matéria-prima, que recortarResumo preserva.
+func conferirResumo(s Summary, grupo string, marcadas int) error {
+	impossivel := func() error {
 		return fmt.Errorf("%w: lancamentos=%d sem_categoria=%d categorias_marcadas=%d",
 			errResumoInconsistente, s.Count, s.Uncategorized, marcadas)
+	}
+
+	if s.IncomeCents < 0 || s.ExpenseCents < 0 || s.InvestedCents < 0 || s.RedeemedCents < 0 ||
+		s.Count < 0 || s.Uncategorized < 0 {
+		return impossivel()
+	}
+	// A identidade do líquido é conferida, e não presumida: ela é o que o
+	// contrato publica como "sempre", inclusive sob recorte. NetCents continua
+	// fora da checagem de ≥ 0 — pode ser negativo, e legitimamente: é o mês
+	// que fechou no vermelho.
+	if s.NetCents != s.IncomeCents-s.ExpenseCents {
+		return impossivel()
+	}
+	for _, k := range s.ByKind {
+		if k.Count < 0 || k.TotalCents < 0 || k.Uncategorized < 0 ||
+			k.MarkedCount < 0 || k.MarkedTotalCents < 0 ||
+			k.MarkedCount > k.Count || k.MarkedTotalCents > k.TotalCents {
+			return impossivel()
+		}
+	}
+
+	switch grupo {
+	case KindGroupIncome:
+		if s.ExpenseCents != 0 {
+			return impossivel()
+		}
+	case KindGroupExpense:
+		if s.IncomeCents != 0 {
+			return impossivel()
+		}
+	case KindGroupTransfer, KindGroupInvestment:
+		if s.IncomeCents != 0 || s.ExpenseCents != 0 || s.Uncategorized != 0 {
+			return impossivel()
+		}
 	}
 	return nil
 }
@@ -727,6 +965,13 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				return ErrAccountArchived
 			}
 
+			// categoriaID e faturaID guardam o id CANÔNICO (o que o banco
+			// devolveu), em cópias próprias: apontar para dentro da entidade
+			// do cache faria a linha a gravar compartilhar memória com um
+			// objeto que outra iteração pode reusar.
+			var categoriaID *string
+			var faturaID *string
+
 			if r.CategoryID != nil {
 				cat, err := s.categoriaCache(ctx, householdID, *r.CategoryID, categorias)
 				if err != nil {
@@ -745,6 +990,8 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				if err := s.recusarGrupoComFilhas(ctx, householdID, cat, grupoComFilhas); err != nil {
 					return err
 				}
+				copia := cat.ID
+				categoriaID = &copia
 			}
 
 			competencia := r.OccurredOn.YearMonth()
@@ -753,7 +1000,13 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				if err != nil {
 					return err
 				}
-				if fatura.AccountID != r.AccountID {
+				// A comparação é CANÔNICA dos dois lados: `fatura.AccountID`
+				// veio do banco e `conta.ID` também. Comparar com
+				// `r.AccountID` — a string do cliente — faria a fatura certa
+				// parecer de outra conta sempre que a caixa do id chegasse
+				// trocada (o MySQL casa o `ByID`, o Go não casa as strings), e
+				// a importação da fatura inteira morreria em 422.
+				if fatura.AccountID != conta.ID {
 					return ErrStatementMismatch
 				}
 				// ADR-023(b): dentro da fatura, a competência é a DA FATURA.
@@ -761,6 +1014,8 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				// pessoa vai pagá-la, e é isto que mantém
 				// SumByStatement coerente com o mês da listagem.
 				competencia = fatura.CompetenceMonth
+				copia := fatura.ID
+				faturaID = &copia
 			}
 
 			ordinal, err := s.proximoOrdinal(ctx, householdID, r.DedupKey, proximoOrdinal)
@@ -792,8 +1047,28 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				ID:          novoID,
 				HouseholdID: householdID,
 				Kind:        r.Kind,
-				AccountID:   r.AccountID,
-				CategoryID:  r.CategoryID,
+				// ⚠️ O QUE É GRAVADO É O ID QUE O BANCO DEVOLVEU, nunca o que
+				// o chamador pediu — mesmo tendo os dois em mãos.
+				//
+				// A posse do id foi conferida em SQL (`WHERE id = ?`), cuja
+				// semântica vem da COLLATION da coluna: `varchar(36)` sem
+				// collation declarada é `utf8mb4_0900_ai_ci` no MySQL 8
+				// (ignora caixa e acento) e `CI_AS` com padding ANSI no MSSQL
+				// (ignora espaço à direita). A IDENTIDADE do mesmo id, depois,
+				// é comparada em Go, byte a byte — o recorte crédito/débito do
+				// relatório e o painel casam `account_id` contra as contas da
+				// casa num mapa, e a listagem resolve o nome da conta assim.
+				// Gravar a string do chamador deixaria uma linha que o SQL
+				// encontra e que NENHUM mapa em Go encontra: a despesa de
+				// cartão sumiria do quadro "Despesas no crédito" em silêncio e
+				// para sempre.
+				//
+				// Vale para os três: conta, categoria e fatura. Em SQLite e
+				// PostgreSQL o `=` é sensível a caixa e a espaço, então nada
+				// disso reproduz ali — é por isso que a defesa mora no código,
+				// e não num teste contra um dialeto só.
+				AccountID:   conta.ID,
+				CategoryID:  categoriaID,
 				AmountCents: r.AmountCents,
 				Description: r.Description,
 				// DescriptionNorm é derivada SEMPRE, aqui, e nunca aceita de
@@ -803,7 +1078,7 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				OccurredOn:      r.OccurredOn,
 				CompetenceMonth: competencia,
 				TransferGroupID: r.TransferGroupID,
-				StatementID:     r.StatementID,
+				StatementID:     faturaID,
 				Source:          in.Source,
 				ImportBatchID:   in.ImportBatchID,
 				ExternalID:      r.ExternalID,
@@ -813,6 +1088,19 @@ func (s *Service) CreateBatch(ctx context.Context, ator Actor, in CreateBatchInp
 				CreatedAt:       agora,
 				UpdatedAt:       agora,
 			})
+		}
+
+		// Reconferência dos PARES sobre os ids CANÔNICOS.
+		//
+		// validarLote já rodou validarPares — mas sobre as strings que o
+		// chamador mandou, antes de qualquer consulta. Com a caixa trocada,
+		// `"<UUID>"` e `"<uuid>"` são duas strings diferentes para o Go e a
+		// MESMA conta para o MySQL: o par passaria pela forma e, depois da
+		// canonização, viraria uma transferência com as duas pernas na mesma
+		// conta — dinheiro saindo e entrando no mesmo lugar, dobrando a linha
+		// no extrato. A canonização não pode ABRIR o que a validação fechava.
+		if err := validarParesCanonicos(linhas); err != nil {
+			return err
 		}
 
 		if err := s.repo.CreateBatch(ctx, householdID, linhas); err != nil {
@@ -1149,6 +1437,58 @@ func (s *Service) contaDaCasa(ctx context.Context, householdID, accountID string
 		return nil, fmt.Errorf("buscando conta do lançamento: %w", err)
 	}
 	return c, nil
+}
+
+// recorteDeCategoria traduz o `categoryId` do cliente no CONJUNTO de ids que
+// a consulta usa: a categoria pedida mais as filhas diretas dela.
+//
+// Três coisas acontecem aqui, e nenhuma pode faltar:
+//
+//  1. A categoria é conferida como sendo DA CASA. Sem isso, pedir a categoria
+//     da vizinha devolveria lista vazia — que não vaza dado, mas também não é
+//     a resposta certa: id que não é meu é 404, igual a id que não existe
+//     (S1). É a mesma porta por onde o filtro de conta passa.
+//  2. O que sobe é o id CANÔNICO do banco, nunca a grafia recebida. No MySQL 8
+//     o `ByID` casa por collation (`utf8mb4_0900_ai_ci` ignora caixa), então o
+//     filtro pode ser aceito com uma grafia que um `IN (...)` sobre a coluna
+//     não precisa reconhecer do mesmo jeito em todo dialeto.
+//  3. O grupo vira `{ele} ∪ {filhas}`, arquivadas incluídas. Arquivar não
+//     desfaz o passado, e a linha do grupo no relatório soma exatamente isto
+//     — o atalho de uma tela para a outra tem de abrir no mesmo dinheiro.
+//     Folha não tem filha e a árvore tem dois níveis, então a consulta extra
+//     é barata e não recursa.
+//
+// Vazio entra e vazio sai: "sem filtro" é o caso comum desta rota.
+func (s *Service) recorteDeCategoria(ctx context.Context, householdID, categoryID string) ([]string, error) {
+	if categoryID == "" {
+		return nil, nil
+	}
+
+	cat, err := s.categoriaDaCasa(ctx, householdID, categoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := []string{cat.ID}
+	// Só grupo tem filha. Perguntar pelas filhas de uma folha seria uma
+	// consulta garantidamente vazia em toda requisição do atalho — e a
+	// maioria dos cliques do relatório cai numa subcategoria.
+	if cat.IsGroup() {
+		filhas, err := s.categories.Children(ctx, householdID, cat.ID)
+		if err != nil {
+			return nil, fmt.Errorf("carregando subcategorias do filtro: %w", err)
+		}
+		for i := range filhas {
+			// A casa é reconferida em Go mesmo com o repositório já
+			// filtrando: esta lista não vira rótulo, vira o conjunto de um
+			// `IN (...)`. Mesma defesa em profundidade de `rotulos`.
+			if filhas[i].HouseholdID != householdID {
+				continue
+			}
+			ids = append(ids, filhas[i].ID)
+		}
+	}
+	return ids, nil
 }
 
 func (s *Service) categoriaDaCasa(ctx context.Context, householdID, categoryID string) (*category.Category, error) {

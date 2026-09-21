@@ -356,10 +356,16 @@ func TestAutoCategorizeTemBaldeProprioDe60PorHora(t *testing.T) {
 
 	rl := config.DefaultRateLimits()
 
-	// Estouro 3 desde 18/09/2026 (achado A2): a rota varre até 10.000
+	// Estouro desde 18/09/2026 (achado A2): a rota varre até 10.000
 	// lançamentos e os pontua contra até 4.000 palavras-chave, e sem Burst o
 	// estouro seria a cota inteira.
-	assert.Equal(t, config.Rule{Requests: 60, Window: time.Hour, Burst: 3}, rl.AutoCategorize)
+	//
+	// O número saiu de 3 para 6 em 21/09/2026 (decisão do usuário, achado A1
+	// da emenda §10 da spec 0010): o "Reprocessar" do menu IA gasta 3 chamadas
+	// na prévia e 3 na execução — a janela é de até 3 meses de competência —,
+	// e o balde repõe 1 token/min, então com 3 o botão nascia com 429
+	// determinístico. A conta completa está no comentário de ratelimits.go.
+	assert.Equal(t, config.Rule{Requests: 60, Window: time.Hour, Burst: 6}, rl.AutoCategorize)
 	assert.Less(t, rl.AutoCategorize.Burst, rl.AutoCategorize.Requests,
 		"rota cara não pode gastar a cota inteira de uma vez")
 
@@ -380,7 +386,7 @@ func TestTransferDetectTemBaldeProprioDe60PorHora(t *testing.T) {
 
 	rl := config.DefaultRateLimits()
 
-	assert.Equal(t, config.Rule{Requests: 60, Window: time.Hour, Burst: 3}, rl.TransferDetect)
+	assert.Equal(t, config.Rule{Requests: 60, Window: time.Hour, Burst: 6}, rl.TransferDetect)
 	assert.Equal(t, rl.AutoCategorize.Requests, rl.TransferDetect.Requests,
 		"as duas ações de reprocessamento em massa têm a mesma cota, em baldes separados")
 	assert.Equal(t, rl.AutoCategorize.Window, rl.TransferDetect.Window)
@@ -390,7 +396,12 @@ func TestTransferDetectTemBaldeProprioDe60PorHora(t *testing.T) {
 	// O ESTOURO é o que impede uma casa de ocupar o pool de conexões inteiro
 	// com execuções simultâneas, dentro da cota (achado A2 da revisão de
 	// segurança). Travado aqui: é limite de segurança, não sintonia.
-	assert.Equal(t, 3, rl.TransferDetect.Burst)
+	//
+	// 6 desde 21/09/2026, e 6 é o MENOR número que faz caber o uso legítimo do
+	// "Reprocessar" (3 meses × prévia + execução). Continua ~4× abaixo do pool
+	// de 25 conexões e 10× abaixo da cota de 60/h, então a defesa do A2 segue
+	// de pé. ⚠️ Pendente de ratificação do revisor-seguranca.
+	assert.Equal(t, 6, rl.TransferDetect.Burst)
 	assert.Less(t, rl.TransferDetect.Burst, rl.TransferDetect.Requests,
 		"rota cara não pode gastar a cota inteira de uma vez")
 	assert.Equal(t, rl.AutoCategorize.Burst, rl.TransferDetect.Burst,
@@ -607,6 +618,9 @@ func TestPerfilDeTesteMantemAFormaDasRegras(t *testing.T) {
 		"AutoCategorize":                rl.AutoCategorize,
 		"TransferDetect":                rl.TransferDetect,
 		"TransactionUpdate":             rl.TransactionUpdate,
+		"AiExport":                      rl.AiExport,
+		"AiImportPreview":               rl.AiImportPreview,
+		"AiImportConfirm":               rl.AiImportConfirm,
 	}
 	padroes := map[string]config.Rule{
 		"Global":                        padrao.Global,
@@ -628,6 +642,9 @@ func TestPerfilDeTesteMantemAFormaDasRegras(t *testing.T) {
 		"AutoCategorize":                padrao.AutoCategorize,
 		"TransferDetect":                padrao.TransferDetect,
 		"TransactionUpdate":             padrao.TransactionUpdate,
+		"AiExport":                      padrao.AiExport,
+		"AiImportPreview":               padrao.AiImportPreview,
+		"AiImportConfirm":               padrao.AiImportConfirm,
 	}
 	require.Len(t, regras, len(padroes),
 		"regra nova sem lugar no perfil de teste — ou ela não foi elevada, ou este teste ficou para trás")
@@ -747,6 +764,25 @@ var regrasPorClasse = map[string]classeDeRegra{
 	// uma rajada legítima de cliques, e um balde de 3 quebraria exatamente
 	// esse uso. `false` de propósito, não por esquecimento.
 	"TransactionUpdate": {false, "grava UMA linha por chamada; o estouro é a cota útil da rajada de cliques"},
+
+	// --- menu IA (spec 0010) ------------------------------------------------
+	// A exportação NÃO é escrita em massa — ela não escreve nada, não abre
+	// transação e não segura conexão do pool dentro de uma escrita. Ainda
+	// assim tem Burst declarado (3), porque a agregação de 3 meses por
+	// `description_norm` em rajada é o único jeito de ela atrapalhar alguém; o
+	// invariante universal acima confere que 0 < Burst < Requests, e a
+	// classificação continua `false` porque a rota não tem o risco de pool que
+	// define a classe.
+	"AiExport": {false, "leitura pura; agrega 3 meses mas não escreve nem segura conexão em transação"},
+	// A prévia varre as descrições da janela e roda o internal/textmatch por
+	// palavra-chave de conta para medir o impacto. Não escreve, mas é a mesma
+	// classe de CPU das rotas de detecção, e o estouro igual à cota deixaria
+	// 60 varreduras simultâneas de uma casa só.
+	"AiImportPreview": {true, "varre a janela e roda o matcher por palavra-chave de conta; estouro igual à cota seriam 60 varreduras simultâneas"},
+	// O confirm é o caro: revalida tudo do zero e grava categorias e
+	// palavras-chave numa ÚNICA transação — cada requisição em voo segura uma
+	// conexão do pool até terminar. É a forma exata do achado A2.
+	"AiImportConfirm": {true, "revalida e grava tudo em UMA transação, segurando conexão do pool (achado A2)"},
 }
 
 // INVARIANTE (achado A2), varrido por REFLEXÃO sobre TODAS as regras de
@@ -765,6 +801,7 @@ func TestRotasDeEscritaEmMassaTemEstouroMenorQueACota(t *testing.T) {
 	perfis := map[string]config.RateLimits{
 		"default": config.DefaultRateLimits(),
 		"test":    config.ProfileRateLimits(config.RateLimitProfileTest),
+		"dev":     config.ProfileRateLimits(config.RateLimitProfileDev),
 	}
 
 	for nomePerfil, rl := range perfis {
@@ -809,4 +846,182 @@ func TestRotasDeEscritaEmMassaTemEstouroMenorQueACota(t *testing.T) {
 			require.Positive(t, emMassaVistas, "nenhuma rota de escrita em massa foi encontrada — a reflexão quebrou?")
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Perfil "dev" — máquina de desenvolvimento (decisão do usuário, 18/09/2026)
+// ---------------------------------------------------------------------------
+
+// O perfil de desenvolvimento eleva os tetos da IMPORTAÇÃO e MAIS NADA. A
+// varredura é por REFLEXÃO sobre todas as regras: no dia em que alguém
+// acrescentar outro afrouxamento aqui — auth, global por IP, rota cara —, o
+// teste aponta o campo pelo nome. "Só a importação" é a decisão, e é isto que
+// este teste trava.
+func TestPerfilDeDesenvolvimentoSobeSoAImportacao(t *testing.T) {
+	t.Parallel()
+
+	env := baseEnv()
+	env["RATE_LIMITS_PROFILE"] = config.RateLimitProfileDev
+	cfg, err := config.LoadFrom(env)
+	require.NoError(t, err)
+
+	rl := cfg.RateLimits
+	padrao := config.DefaultRateLimits()
+
+	assert.Equal(t, config.ProfileRateLimits(config.RateLimitProfileDev), rl)
+	assert.NotEqual(t, padrao, rl)
+	// O boot precisa AVISAR: o perfil não é o de produção.
+	assert.True(t, cfg.UsesLooseRateLimits())
+
+	// Os três tetos que o perfil existe para levantar — cota 5× o padrão e
+	// ESTOURO fixado NA COTA DO PADRÃO (achado F2 da revisão de segurança:
+	// Burst 0 significa "estouro = cota", então subir a cota sem declarar
+	// Burst deixaria 50 uploads e 150 confirms simultâneos de uma casa só).
+	assert.Equal(t, config.Rule{Requests: 50, Window: time.Hour, Burst: 10}, rl.ImportUpload)
+	assert.Equal(t, config.Rule{Requests: 100, Window: time.Hour, Burst: 20}, rl.ImportUploadIP)
+	assert.Equal(t, config.Rule{Requests: 150, Window: time.Hour, Burst: 30}, rl.ImportConfirm)
+
+	// A FORMA do padrão é preservada: o teto por IP é o dobro do teto por
+	// casa, e o confirm é o triplo do upload. Perfil é o mesmo desenho com
+	// folga, não um desenho paralelo.
+	assert.Equal(t, 2*rl.ImportUpload.Requests, rl.ImportUploadIP.Requests)
+	assert.Equal(t, 3*rl.ImportUpload.Requests, rl.ImportConfirm.Requests)
+
+	elevadas := map[string]bool{"ImportUpload": true, "ImportUploadIP": true, "ImportConfirm": true}
+
+	v, p := reflect.ValueOf(rl), reflect.ValueOf(padrao)
+	tipoRegra := reflect.TypeOf(config.Rule{})
+	vistas := 0
+	for i := range v.NumField() {
+		campo := v.Type().Field(i)
+		if campo.Type != tipoRegra {
+			continue // IdleTTL e o que mais vier que não seja Rule
+		}
+		regra := v.Field(i).Interface().(config.Rule)
+		regraPadrao := p.Field(i).Interface().(config.Rule)
+
+		if !elevadas[campo.Name] {
+			assert.Equalf(t, regraPadrao, regra,
+				"regra %s mudou no perfil dev: ele eleva SÓ a importação — auth, global por IP e "+
+					"rotas de detecção continuam nos tetos de produção (docs/SEGURANCA.md §5.2)", campo.Name)
+			continue
+		}
+		vistas++
+		assert.Equalf(t, regraPadrao.Window, regra.Window, "regra %s trocou a janela", campo.Name)
+		assert.Greaterf(t, regra.Requests, regraPadrao.Requests, "regra %s não subiu", campo.Name)
+
+		// O ESTOURO não acompanha a cota: ele fica na cota do PADRÃO. É o que
+		// mantém intacta a concorrência instantânea por casa — o pool de
+		// conexões do confirm e a conta de heap de internal/textmatch/matcher.go
+		// (achados A2 e F2). Regra elevada SEM Burst voltaria a valer "estouro
+		// = cota", que é exatamente o que este perfil não pode introduzir.
+		assert.Positivef(t, regra.Burst,
+			"regra %s subiu de cota e ficou sem Burst: estouro volta a ser a cota inteira (%d de uma vez)",
+			campo.Name, regra.Requests)
+		assert.Equalf(t, regraPadrao.Requests, regra.Burst,
+			"regra %s: o estouro do perfil dev é a COTA DO PADRÃO, nem mais nem menos", campo.Name)
+	}
+	require.Equal(t, len(elevadas), vistas, "alguma regra de importação sumiu da struct — a reflexão quebrou?")
+
+	// O que não é Rule também fica como no padrão.
+	assert.Equal(t, padrao.IdleTTL, rl.IdleTTL)
+}
+
+// O perfil dev é amarrado ao ambiente de desenvolvimento, pelo mesmo motivo do
+// perfil de teste (achado B2): perfil não-padrão que aceita qualquer rótulo de
+// ambiente é perfil que sobe onde não devia.
+func TestPerfilDeDesenvolvimentoExigeAppEnvDevelopment(t *testing.T) {
+	t.Parallel()
+
+	for _, ambiente := range []string{config.EnvTest, config.EnvProduction} {
+		t.Run(ambiente, func(t *testing.T) {
+			t.Parallel()
+			env := baseEnv()
+			if ambiente == config.EnvProduction {
+				env = prodEnv()
+			}
+			env["APP_ENV"] = ambiente
+			env["RATE_LIMITS_PROFILE"] = config.RateLimitProfileDev
+
+			_, err := config.LoadFrom(env)
+			require.Error(t, err, "APP_ENV=%s aceitou o perfil dev", ambiente)
+			assert.ErrorIs(t, err, config.ErrInvalid)
+			assert.Contains(t, err.Error(), "RATE_LIMITS_PROFILE")
+			assert.Contains(t, err.Error(), "APP_ENV")
+		})
+	}
+}
+
+// SALVAGUARDA: produção recusa QUALQUER perfil que não seja o padrão — e caixa
+// e espaços não driblam a trava, porque o valor é normalizado antes.
+func TestProducaoRecusaQualquerPerfilNaoPadrao(t *testing.T) {
+	t.Parallel()
+
+	for _, valor := range []string{
+		config.RateLimitProfileDev, "DEV", " dev ", "Dev",
+		config.RateLimitProfileTest, "TEST",
+	} {
+		t.Run(valor, func(t *testing.T) {
+			t.Parallel()
+			env := prodEnv()
+			env["RATE_LIMITS_PROFILE"] = valor
+			_, err := config.LoadFrom(env)
+			require.Errorf(t, err, "produção aceitou o perfil %q", valor)
+			assert.ErrorIs(t, err, config.ErrInvalid)
+			assert.Contains(t, err.Error(), "RATE_LIMITS_PROFILE")
+		})
+	}
+}
+
+// SALVAGUARDA (achado F1 da revisão de segurança): perfil não-padrão exige
+// APP_ENV DECLARADO. Sem isto, a amarração de ambiente do perfil `dev` seria
+// satisfeita pelo silêncio — `development` é o envDefault do campo —, e uma
+// única variável solta num manifesto que nunca setou APP_ENV bastaria para
+// elevar tetos. Perfil não-padrão custa DUAS decisões explícitas.
+func TestPerfilNaoPadraoExigeAppEnvExplicito(t *testing.T) {
+	t.Parallel()
+
+	// As duas formas do silêncio: a chave AUSENTE e a chave DECLARADA VAZIA.
+	// A segunda é o achado R1 da segunda rodada da revisão — `APP_ENV=` faz a
+	// lib de ambiente aplicar o envDefault igualzinho à ausência, então aceitá-la
+	// como declaração seria aceitar o padrão implícito pela porta dos fundos.
+	silencios := map[string]func(map[string]string){
+		"ausente": func(env map[string]string) { delete(env, "APP_ENV") },
+		"vazia":   func(env map[string]string) { env["APP_ENV"] = "" },
+	}
+
+	for _, perfil := range []string{config.RateLimitProfileDev, config.RateLimitProfileTest} {
+		for nome, silenciar := range silencios {
+			t.Run(perfil+"/"+nome, func(t *testing.T) {
+				t.Parallel()
+				env := baseEnv()
+				silenciar(env) // o manifesto que nunca disse qual é a máquina
+				env["RATE_LIMITS_PROFILE"] = perfil
+
+				_, err := config.LoadFrom(env)
+				require.Errorf(t, err, "perfil %q subiu com APP_ENV %s", perfil, nome)
+				assert.ErrorIs(t, err, config.ErrInvalid)
+				assert.Contains(t, err.Error(), "APP_ENV")
+			})
+		}
+	}
+
+	// CONTROLE: sem APP_ENV e sem perfil, nada muda — o default implícito
+	// continua valendo para todo o resto da configuração, com os limites de
+	// produção.
+	env := baseEnv()
+	delete(env, "APP_ENV")
+	cfg, err := config.LoadFrom(env)
+	require.NoError(t, err)
+	assert.Equal(t, config.EnvDevelopment, cfg.AppEnv)
+	assert.Equal(t, config.DefaultRateLimits(), cfg.RateLimits)
+	assert.False(t, cfg.UsesLooseRateLimits())
+
+	// CONTROLE 2: com APP_ENV declarado, o perfil sobe — a trava é sobre o
+	// silêncio, não sobre o valor.
+	env = baseEnv()
+	env["RATE_LIMITS_PROFILE"] = config.RateLimitProfileDev
+	cfg, err = config.LoadFrom(env)
+	require.NoError(t, err)
+	assert.Equal(t, config.ProfileRateLimits(config.RateLimitProfileDev), cfg.RateLimits)
 }

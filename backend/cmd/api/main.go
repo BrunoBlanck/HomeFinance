@@ -17,14 +17,18 @@ import (
 	"time"
 
 	"github.com/brunorblanck/homefinance/backend/internal/account"
+	"github.com/brunorblanck/homefinance/backend/internal/aiimport"
+	"github.com/brunorblanck/homefinance/backend/internal/aiprompt"
 	"github.com/brunorblanck/homefinance/backend/internal/audit"
 	"github.com/brunorblanck/homefinance/backend/internal/auth"
 	"github.com/brunorblanck/homefinance/backend/internal/cardstatement"
 	"github.com/brunorblanck/homefinance/backend/internal/category"
 	"github.com/brunorblanck/homefinance/backend/internal/classify"
+	"github.com/brunorblanck/homefinance/backend/internal/dashboard"
 	"github.com/brunorblanck/homefinance/backend/internal/household"
 	"github.com/brunorblanck/homefinance/backend/internal/importer"
 	"github.com/brunorblanck/homefinance/backend/internal/importer/c6"
+	"github.com/brunorblanck/homefinance/backend/internal/importer/inter"
 	"github.com/brunorblanck/homefinance/backend/internal/importer/nubank"
 	"github.com/brunorblanck/homefinance/backend/internal/investment"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/config"
@@ -45,6 +49,23 @@ func main() {
 		fmt.Fprintf(os.Stderr, "falha ao iniciar: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// newParserRegistry monta a lista COMPLETA de leiautes de importação.
+//
+// É a única lista: o serviço real usa esta função, e o teste de fixtures
+// (parsers_test.go) usa a MESMA, para que um leiaute novo não possa entrar aqui
+// sem passar pela prova de que cada fixture anonimizada casa com exatamente um
+// parser. Os cinco leiautes de hoje (extrato e fatura do Nubank, extrato e
+// fatura do C6, extrato do Inter) entram por construtor; cada um DECLARA a sua
+// convenção de sinal e o cabeçalho reconhecido, e a detecção escolhe pelo
+// cabeçalho, nunca pela instituição marcada na conta (spec 0004 §7).
+func newParserRegistry() (*importer.Registry, error) {
+	return importer.NewRegistry(
+		nubank.NewChecking(), nubank.NewCard(),
+		c6.NewChecking(), c6.NewCard(),
+		inter.NewChecking(),
+	)
 }
 
 func run() error {
@@ -71,7 +92,7 @@ func run() error {
 	// existe para o caso do "ambiente de homologação que virou produção sem
 	// ninguém trocar o APP_ENV" — que é como esse tipo de coisa vaza.
 	if cfg.UsesLooseRateLimits() {
-		lg.WarnContext(ctx, "perfil de limites de abuso FROUXO ativo — use apenas em teste automatizado, NUNCA em produção",
+		lg.WarnContext(ctx, "perfil de limites de abuso NÃO-PADRÃO ativo — use apenas em teste automatizado ou na máquina de desenvolvimento, NUNCA em produção",
 			slog.String("rate_limits_profile", cfg.RateLimitProfile),
 			slog.String("app_env", cfg.AppEnv))
 	}
@@ -148,6 +169,9 @@ func run() error {
 	categorySvc := category.NewService(categoryRepo, uow,
 		category.WithAudit(categoryAuditBridge{svc: auditSvc}),
 		category.WithUsageCheckers(usoEmLancamentos),
+		// A escrita ADITIVA de palavras-chave do import de IA (spec 0010
+		// §10.4, achado A2): o mesmo repositório, por uma interface à parte.
+		category.WithKeywordAppender(categoryRepo),
 	)
 	householdSvc := household.NewService(householdRepo, membershipRepo,
 		household.WithSeeders(categorySvc),
@@ -158,6 +182,7 @@ func run() error {
 		account.WithAudit(auditBridge{svc: auditSvc}),
 		account.WithBalances(txRepo),
 		account.WithUsageCheckers(usoEmLancamentos),
+		account.WithKeywordAppender(accountRepo),
 	)
 	userSvc := user.NewService(userRepo, householdSvc)
 
@@ -181,16 +206,10 @@ func run() error {
 		cardstatement.WithAudit(cardStatementAuditBridge{svc: auditSvc}),
 	)
 
-	// O REGISTRO de parsers é montado aqui, uma vez, e é imutável depois: é ele
-	// que decide qual leiaute lê qual arquivo, e essa lista não pode depender da
-	// ordem de import dos pacotes. Os quatro leiautes de hoje (extrato e fatura do
-	// Nubank, extrato e fatura do C6) entram por construtor; cada um DECLARA a sua
-	// convenção de sinal e o cabeçalho reconhecido, e a detecção escolhe pelo
-	// cabeçalho, nunca pela instituição marcada na conta (spec 0004 §7).
-	parserRegistry, err := importer.NewRegistry(
-		nubank.NewChecking(), nubank.NewCard(),
-		c6.NewChecking(), c6.NewCard(),
-	)
+	// O REGISTRO de parsers é montado uma vez (newParserRegistry) e é imutável
+	// depois: é ele que decide qual leiaute lê qual arquivo, e essa lista não
+	// pode depender da ordem de import dos pacotes.
+	parserRegistry, err := newParserRegistry()
 	if err != nil {
 		return err
 	}
@@ -200,9 +219,11 @@ func run() error {
 	)
 
 	// Relatórios (ADR-027): leitura pura sobre os repositórios de lançamento
-	// (agregação no banco) e de categoria (a árvore, dobrada em Go). Sem
-	// UnitOfWork e sem auditoria — não há escrita.
-	reportSvc := report.NewService(txRepo, categoryRepo, lg)
+	// (agregação no banco), de categoria (a árvore, dobrada em Go) e de conta
+	// (o recorte crédito/débito, ADR-032 — resolvido em Go sobre as contas da
+	// casa, sem id de conta no SQL). Sem UnitOfWork e sem auditoria — não há
+	// escrita.
+	reportSvc := report.NewService(txRepo, categoryRepo, accountRepo, lg)
 
 	// Investimentos (ADR-029): como o relatório, é CONSUMIDOR de lançamento,
 	// categoria e conta — mas, diferente dele, ESCREVE: o `detect` marca em
@@ -213,6 +234,30 @@ func run() error {
 	// divergir.
 	investmentSvc := investment.NewService(txRepo, categoryRepo, accountRepo, classifier, uow, lg,
 		investment.WithAudit(investmentAuditBridge{svc: auditSvc}),
+	)
+
+	// Painel (ADR-031): o terceiro consumidor de leitura agregada, depois do
+	// relatório e do investimento. Consome os MESMOS três repositórios — e é
+	// por isso que ele não é escrita: o resumo do mês não desfaz nem rastreia
+	// nada, então não leva UnitOfWork nem auditoria.
+	dashboardSvc := dashboard.NewService(txRepo, categoryRepo, accountRepo, lg)
+
+	// Menu IA — exportação (spec 0010, E9a). LEITURA PURA: o construtor não
+	// recebe UnitOfWork nem Auditor, e é isso que torna "o export não escreve"
+	// verificável pelo compilador (§10.3 da spec 0010).
+	aiPromptSvc := aiprompt.NewService(txRepo, categoryRepo, accountRepo, lg)
+
+	// Menu IA — importação (spec 0010, E9b). É o irmão que ESCREVE, e
+	// escreve pelos SERVIÇOS: categoria nasce por categorySvc.Create (o mesmo
+	// caminho do POST /categories — teto de 200, pai na casa do token,
+	// herança da natureza, auditoria) e palavra entra por AppendKeywords dos
+	// dois serviços, a única extração que a §10.4 autorizou — aditiva. Os repositórios
+	// entram só como leitura, para o índice em memória; o razão, para medir o
+	// impacto. Mesmo UnitOfWork: o confirm é UMA transação, e o Create
+	// reentra nela.
+	aiImportSvc := aiimport.NewService(categoryRepo, categorySvc, accountRepo, accountSvc,
+		txRepo, uow, lg,
+		aiimport.WithAudit(aiImportAuditBridge{svc: auditSvc}),
 	)
 
 	hasher, err := auth.NewPasswordHasher(auth.Argon2Params{
@@ -310,6 +355,12 @@ func run() error {
 		transferDetect: newLimiter(rl.TransferDetect),
 		// Por casa, balde separado dos dois acima (spec 0006 §3.3.5).
 		investmentDetect: newLimiter(rl.InvestmentDetect),
+		// Por casa, balde próprio do menu IA (spec 0010 §8.6).
+		aiExport: newLimiter(rl.AiExport),
+		// Por casa, dois baldes separados para o import de IA: a prévia roda o
+		// matcher, o confirm segura conexão do pool numa transação (§8.6).
+		aiImportPreview: newLimiter(rl.AiImportPreview),
+		aiImportConfirm: newLimiter(rl.AiImportConfirm),
 		// Por casa, balde próprio do atalho de categoria (emenda §11).
 		transactionUpdate: newLimiter(rl.TransactionUpdate),
 	}
@@ -333,6 +384,14 @@ func run() error {
 	importHandler := importer.NewHandler(importSvc, lg, cfg.HTTP.TrustedProxyCount)
 	reportHandler := report.NewHandler(reportSvc, lg)
 	investmentHandler := investment.NewHandler(investmentSvc, lg, cfg.HTTP.TrustedProxyCount)
+	// Sem trustedProxyCount: o painel não audita e não tem limitador próprio,
+	// então não lê o IP do cliente (ADR-031e) — igual ao do relatório.
+	dashboardHandler := dashboard.NewHandler(dashboardSvc, lg)
+	// Sem trustedProxyCount pelo mesmo motivo do painel: esta rota não audita,
+	// então não lê o IP do cliente.
+	aiPromptHandler := aiprompt.NewHandler(aiPromptSvc, lg)
+	// COM trustedProxyCount: o confirm audita, e a auditoria leva o IP.
+	aiImportHandler := aiimport.NewHandler(aiImportSvc, lg, cfg.HTTP.TrustedProxyCount)
 
 	// --- Rotas e cadeia de middlewares ------------------------------------
 	routes := buildRoutes(routeDeps{
@@ -345,6 +404,9 @@ func run() error {
 		importer:      importHandler,
 		report:        reportHandler,
 		investment:    investmentHandler,
+		dashboard:     dashboardHandler,
+		aiPrompt:      aiPromptHandler,
+		aiImport:      aiImportHandler,
 		ready:         httpserver.Ready(db, lg),
 		limiters:      perRoute,
 		requireAuth:   httpserver.RequireAuth(authHandler),
@@ -370,15 +432,34 @@ func run() error {
 		httpserver.SecurityHeaders(cfg.Cookie.Secure),
 		httpserver.CORS(allowlist),
 		httpserver.CSRFGuard(allowlist),
-		// O teto de corpo continua 1 MiB para TODAS as rotas, com UMA exceção
-		// declarada por caminho EXATO: POST /imports, que recebe arquivo.
-		// Subir o teto global abriria 8 MiB nas rotas de autenticação, e
-		// embrulhar de novo dentro da rota não funcionaria — quem corta é o
-		// MaxBytesReader mais interno (spec 0004 §6.4).
+		// O teto de corpo continua 1 MiB para TODAS as rotas, com exceções
+		// declaradas por caminho EXATO — sem prefixo e sem curinga. Subir o
+		// teto global abriria 8 MiB nas rotas de autenticação, e embrulhar de
+		// novo dentro da rota não funcionaria: quem corta é o MaxBytesReader
+		// mais interno (spec 0004 §6.4).
+		//
+		// POST /imports SOBE o teto (recebe arquivo). As duas rotas do import
+		// de IA o BAIXAM, e a direção é o ponto: o corpo delas é JSON colado
+		// de uma IA — entrada hostil que o servidor vai parsear, validar campo
+		// a campo e casar contra o banco. 1 MiB disso é trabalho de graça para
+		// quem manda, e nenhum payload legítimo do formato chega perto de 128
+		// KiB (spec 0010 §4.2, regra 1).
 		httpserver.MaxBytesByPath(config.MaxRequestBodyBytes, map[string]int64{
-			APIBasePath + "/imports": importer.MaxUploadBytes,
+			APIBasePath + "/imports":                   importer.MaxUploadBytes,
+			APIBasePath + "/ai/keyword-import/preview": aiimport.MaxPayloadBytes,
+			APIBasePath + "/ai/keyword-import/confirm": aiimport.MaxPayloadBytes,
 		}),
 		httpserver.RateLimit(globalLimiter, httpserver.IPKey(cfg.HTTP.TrustedProxyCount)),
+		// ÚLTIMO da lista = MAIS INTERNO, envolvendo o ErrorShim(newMux(...)).
+		// A posição é parte da decisão, não acaso:
+		//  (1) a resposta sai por DENTRO de SecurityHeaders/CORS, que são
+		//      externos, então o navegador consegue ler o 400 em vez de tomar
+		//      um erro de CORS opaco;
+		//  (2) fica DEPOIS do CSRFGuard — origem estranha continua barrada
+		//      antes de qualquer validação de entrada;
+		//  (3) fica DEPOIS do RateLimit — enxurrada de query malformada
+		//      continua gastando balde; checagem barata não vira rota grátis.
+		httpserver.WellFormedQuery(),
 	)
 
 	// --- Janitor -----------------------------------------------------------

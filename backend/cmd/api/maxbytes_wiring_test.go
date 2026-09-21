@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/brunorblanck/homefinance/backend/internal/aiimport"
 	"github.com/brunorblanck/homefinance/backend/internal/importer"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/config"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/httpserver"
@@ -29,11 +30,28 @@ import (
 // Sem a segunda metade, o middleware poderia estar perfeito e a chamada em
 // main.go abrir 8 MiB em `/api/v1/` inteiro sem nenhum teste ficar vermelho.
 
+// caminhos das exceções, escritos UMA vez para o teste e para a varredura de
+// "toda outra rota continua em 1 MiB" não divergirem.
+const (
+	caminhoImports         = APIBasePath + "/imports"
+	caminhoAiImportPreview = APIBasePath + "/ai/keyword-import/preview"
+	caminhoAiImportConfirm = APIBasePath + "/ai/keyword-import/confirm"
+)
+
 // tabelaDeExcecoes é a MESMA tabela montada em main.go. A prova de que é a
 // mesma não é a leitura do revisor: é o TestTabelaDeExcecoesDoMainEhEstaMesma
 // abaixo, que confere a chamada real no fonte.
+//
+// São TRÊS exceções, e elas vão em direções opostas: POST /imports SOBE o teto
+// para 8 MiB (recebe arquivo); as duas rotas do import de IA o BAIXAM para 128
+// KiB, porque o corpo delas é JSON colado de uma IA — entrada hostil que o
+// servidor parseia e casa contra o banco (spec 0010 §4.2).
 func tabelaDeExcecoes() map[string]int64 {
-	return map[string]int64{APIBasePath + "/imports": importer.MaxUploadBytes}
+	return map[string]int64{
+		caminhoImports:         importer.MaxUploadBytes,
+		caminhoAiImportPreview: aiimport.MaxPayloadBytes,
+		caminhoAiImportConfirm: aiimport.MaxPayloadBytes,
+	}
 }
 
 func handlerQueLeTudo() http.Handler {
@@ -70,17 +88,54 @@ func TestOsNumerosSaoOsDaSpec(t *testing.T) {
 
 	assert.EqualValues(t, 8<<20, importer.MaxUploadBytes, "o upload é 8 MiB (spec 0004 §5.6)")
 	assert.EqualValues(t, 1<<20, config.MaxRequestBodyBytes, "o teto global continua 1 MiB")
+	assert.EqualValues(t, 128<<10, aiimport.MaxPayloadBytes, "o import de IA é 128 KiB (spec 0010 §4.2)")
+
+	// A direção de cada exceção é contrato, não acaso: uma sobe, duas descem.
+	// Trocar o sinal de qualquer uma é decisão de segurança, e quebra aqui.
+	// (As conversões existem porque MaxUploadBytes é `int` e os outros dois são
+	// `int64`; comparar tipos diferentes com testify falha por tipo, não por
+	// valor, e esconderia o que o teste quer afirmar.)
+	assert.Greater(t, int64(importer.MaxUploadBytes), config.MaxRequestBodyBytes,
+		"POST /imports é a exceção que SOBE — ele recebe arquivo")
+	assert.Less(t, aiimport.MaxPayloadBytes, config.MaxRequestBodyBytes,
+		"o import de IA é a exceção que DESCE — o corpo é JSON hostil, e 1 MiB dele é trabalho de graça")
 }
 
 func TestPostImportsAceitaOitoMebibytesReais(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, http.StatusOK,
-		statusComCorpoDe(t, APIBasePath+"/imports", importer.MaxUploadBytes),
+		statusComCorpoDe(t, caminhoImports, importer.MaxUploadBytes),
 		"a rota de importação precisa aceitar 8 MiB inteiros")
 	assert.Equal(t, http.StatusRequestEntityTooLarge,
-		statusComCorpoDe(t, APIBasePath+"/imports", importer.MaxUploadBytes+1),
+		statusComCorpoDe(t, caminhoImports, importer.MaxUploadBytes+1),
 		"e recusar UM byte acima")
+}
+
+// As duas rotas do import de IA aceitam 128 KiB inteiros e recusam UM byte
+// acima — com 413, que é o que o MaxBytesReader produz, e não 400 (achado A4
+// da emenda §10 da spec 0010).
+func TestImportDeIAAceitaCentoEVinteEOitoKibibytesReais(t *testing.T) {
+	t.Parallel()
+
+	for _, caminho := range []string{caminhoAiImportPreview, caminhoAiImportConfirm} {
+		t.Run(caminho, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, http.StatusOK,
+				statusComCorpoDe(t, caminho, aiimport.MaxPayloadBytes),
+				"%s precisa aceitar 128 KiB inteiros", caminho)
+			assert.Equal(t, http.StatusRequestEntityTooLarge,
+				statusComCorpoDe(t, caminho, aiimport.MaxPayloadBytes+1),
+				"%s precisa recusar UM byte acima, com 413", caminho)
+
+			// E o principal: o teto BAIXO é real. Um corpo que passaria no
+			// teto global de 1 MiB é recusado aqui.
+			assert.Equal(t, http.StatusRequestEntityTooLarge,
+				statusComCorpoDe(t, caminho, config.MaxRequestBodyBytes),
+				"%s NÃO pode herdar o teto global de 1 MiB", caminho)
+		})
+	}
 }
 
 // TestTodaOutraRotaContinuaNoTetoDeUmMebibyte é o teste que a §6.4 exige com
@@ -89,11 +144,12 @@ func TestPostImportsAceitaOitoMebibytesReais(t *testing.T) {
 func TestTodaOutraRotaContinuaNoTetoDeUmMebibyte(t *testing.T) {
 	t.Parallel()
 
-	// Toda rota real da tabela, exceto a exceção declarada.
+	// Toda rota real da tabela, exceto as exceções declaradas.
+	excecoes := tabelaDeExcecoes()
 	caminhos := map[string]bool{}
 	for _, rt := range buildRoutes(routeDeps{}) {
 		caminho := APIBasePath + rt.Pattern
-		if caminho == APIBasePath+"/imports" {
+		if _, excecao := excecoes[caminho]; excecao {
 			continue
 		}
 		// Padrões com {id} viram um caminho concreto: é o que o cliente manda.
@@ -102,6 +158,9 @@ func TestTodaOutraRotaContinuaNoTetoDeUmMebibyte(t *testing.T) {
 	require.NotEmpty(t, caminhos)
 
 	// E as variações perigosas, que são o motivo de a comparação ser EXATA.
+	// Elas valem para as TRÊS exceções, e não só para a que sobe o teto: um
+	// teto por prefixo em `/ai/keyword-import` faria `/ai/keyword-importXYZ`
+	// herdar 128 KiB, e — pior — um prefixo em `/ai/` cortaria o export.
 	for _, variacao := range []string{
 		APIBasePath + "/imports/",
 		APIBasePath + "/importsXYZ",
@@ -114,6 +173,17 @@ func TestTodaOutraRotaContinuaNoTetoDeUmMebibyte(t *testing.T) {
 		"/imports",
 		APIBasePath + "/imports/abc",
 		APIBasePath + "/imports/abc/confirm",
+		APIBasePath + "/ai/keyword-import/preview/",
+		APIBasePath + "/ai/keyword-import/previewXYZ",
+		APIBasePath + "/ai/keyword-import/confirm/",
+		APIBasePath + "/ai/keyword-import/confirmXYZ",
+		APIBasePath + "/ai/keyword-import",
+		APIBasePath + "/ai/keyword-import/",
+		APIBasePath + "/AI/keyword-import/preview",
+		APIBasePath + "//ai/keyword-import/preview",
+		APIBasePath + "/ai/export-prompt",
+		APIBasePath + "/ai",
+		"/ai/keyword-import/preview",
 	} {
 		caminhos[variacao] = true
 	}
@@ -165,13 +235,23 @@ func indexOf(s string, c byte) int {
 //
 // A saída é conferir a chamada real na árvore sintática: `MaxBytesByPath`
 // precisa aparecer UMA vez, com o teto global como primeiro argumento e um mapa
-// de EXATAMENTE uma entrada, cuja chave é `APIBasePath + "/imports"` e cujo
-// valor é `importer.MaxUploadBytes`.
+// de EXATAMENTE três entradas, todas com chave `APIBasePath + "<caminho
+// literal>"` e valor vindo de uma constante nomeada.
 //
-// O dia em que alguém acrescentar uma segunda exceção — ou trocar a chave por
-// um prefixo —, este teste fica vermelho antes de o código chegar à revisão.
+// O dia em que alguém acrescentar uma quarta exceção — ou trocar uma chave por
+// um prefixo, ou um valor por um número solto —, este teste fica vermelho antes
+// de o código chegar à revisão. A lista abaixo é a AUTORIZAÇÃO: entrada que não
+// está aqui não passa, e acrescentá-la é um ato deliberado, num teste que o
+// revisor lê.
 func TestTabelaDeExcecoesDoMainEhEstaMesma(t *testing.T) {
 	t.Parallel()
+
+	// caminho literal (sem APIBasePath) -> nome da constante do teto.
+	autorizadas := map[string]string{
+		`"/imports"`:                   "MaxUploadBytes",
+		`"/ai/keyword-import/preview"`: "MaxPayloadBytes",
+		`"/ai/keyword-import/confirm"`: "MaxPayloadBytes",
+	}
 
 	fset := token.NewFileSet()
 	arquivo, err := parser.ParseFile(fset, "main.go", nil, parser.SkipObjectResolution)
@@ -199,26 +279,37 @@ func TestTabelaDeExcecoesDoMainEhEstaMesma(t *testing.T) {
 	require.True(t, ok, "o teto padrão vem de uma constante, nunca de um literal solto")
 	assert.Equal(t, "MaxRequestBodyBytes", padrao.Sel.Name)
 
-	// 2º argumento: o mapa de exceções, com exatamente uma entrada.
+	// 2º argumento: o mapa de exceções, com exatamente as entradas autorizadas.
 	mapa, ok := chamada.Args[1].(*ast.CompositeLit)
 	require.True(t, ok, "as exceções são um literal de mapa, revisável numa olhada")
-	require.Len(t, mapa.Elts, 1, "há EXATAMENTE uma exceção declarada; uma segunda precisa de revisão")
+	require.Len(t, mapa.Elts, len(autorizadas),
+		"há EXATAMENTE %d exceções declaradas; uma a mais precisa de revisão", len(autorizadas))
 
-	par, ok := mapa.Elts[0].(*ast.KeyValueExpr)
-	require.True(t, ok)
+	vistas := map[string]bool{}
+	for _, elemento := range mapa.Elts {
+		par, ok := elemento.(*ast.KeyValueExpr)
+		require.True(t, ok)
 
-	// A chave é `APIBasePath + "/imports"` — caminho EXATO, sem curinga.
-	soma, ok := par.Key.(*ast.BinaryExpr)
-	require.True(t, ok, "a chave é APIBasePath + o caminho")
-	base, ok := soma.X.(*ast.Ident)
-	require.True(t, ok)
-	assert.Equal(t, "APIBasePath", base.Name)
-	sufixo, ok := soma.Y.(*ast.BasicLit)
-	require.True(t, ok)
-	assert.Equal(t, `"/imports"`, sufixo.Value)
+		// A chave é `APIBasePath + "<caminho>"` — caminho EXATO, sem curinga.
+		soma, ok := par.Key.(*ast.BinaryExpr)
+		require.True(t, ok, "a chave é APIBasePath + o caminho")
+		base, ok := soma.X.(*ast.Ident)
+		require.True(t, ok)
+		assert.Equal(t, "APIBasePath", base.Name)
+		sufixo, ok := soma.Y.(*ast.BasicLit)
+		require.True(t, ok)
 
-	// O valor é o teto do upload, pelo nome.
-	valor, ok := par.Value.(*ast.SelectorExpr)
-	require.True(t, ok, "o valor vem de importer.MaxUploadBytes, nunca de um número mágico")
-	assert.Equal(t, "MaxUploadBytes", valor.Sel.Name)
+		constante, autorizada := autorizadas[sufixo.Value]
+		require.Truef(t, autorizada,
+			"exceção de teto para %s não está autorizada neste teste — uma rota com teto próprio é decisão de segurança",
+			sufixo.Value)
+		assert.Falsef(t, vistas[sufixo.Value], "caminho %s declarado duas vezes", sufixo.Value)
+		vistas[sufixo.Value] = true
+
+		// O valor vem de uma constante NOMEADA, nunca de um número mágico.
+		valor, ok := par.Value.(*ast.SelectorExpr)
+		require.True(t, ok, "o valor vem de uma constante de pacote, nunca de um número mágico")
+		assert.Equal(t, constante, valor.Sel.Name, "teto errado para %s", sufixo.Value)
+	}
+	assert.Len(t, vistas, len(autorizadas), "alguma exceção autorizada sumiu da tabela do main.go")
 }

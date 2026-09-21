@@ -40,6 +40,13 @@
     /* Tipografia */
     --font-display: "Fraunces", Georgia, "Times New Roman", serif;
     --font-ui: "Public Sans", system-ui, "Segoe UI", sans-serif;
+    /* Uso RESTRITO (docs/DESIGN.md, spec 0010): o <pre> do prompt de /ia e o
+       campo de colar o JSON da resposta. Ali a fonte monoespaçada é semântica —
+       é texto que vai ser copiado inteiro, byte a byte, para outro programa.
+       Em qualquer outro lugar (rótulo, número, dado de tabela) é erro de
+       revisão: dinheiro se alinha com `tabular-nums`, não trocando de família. */
+    --font-mono:
+      ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", "Liberation Mono", monospace;
     /* Excecao unica da escala (docs/DESIGN.md): rotulo da barra de navegacao
        inferior do celular, e nada mais. A 13px, seis itens a 320px nao cabem em
        duas linhas — e tres linhas num item foi o defeito que originou a emenda. */

@@ -65,6 +65,47 @@
     border-block-end: 1px solid var(--border);
   }
 
+  /* Os dois filtros da faixa, lado a lado. Cada campo mantém a largura do
+     próprio conteúdo e EMBRULHA quando não cabe — a 375 px eles empilham, cada
+     um com a sua largura, sem esticar. `flex-end` alinha os controles pela
+     base, porque os rótulos visíveis têm alturas iguais mas o alinhamento por
+     baseline quebraria se um deles ganhasse mensagem de erro. */
+  .filtros {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-4);
+  }
+
+  /* O filtro de categoria não é um seletor: ele chega pelo atalho do
+     relatório. Aqui ele só se DECLARA — rótulo, nome e a saída —, alinhado
+     pela base com os dois seletores vizinhos. Sem cor: ele é estado de
+     filtro, não estado financeiro. */
+  .filtroDeCategoria {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background-color: var(--surface);
+    /* Acompanha a altura do campo dos seletores ao lado. */
+    min-block-size: 2.25rem;
+  }
+
+  .rotuloDoFiltro {
+    font-size: var(--text-12);
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .nomeDoFiltro {
+    font-size: var(--text-13);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
   /* Entrou e Saiu são NEUTROS e sem sinal: a palavra já diz a direção, e pintar
      os dois gastaria --income/--expense em informação que o texto já carrega.
      Resultado é o único número ambíguo da barra — ele leva tom e sinal. */
@@ -184,6 +225,10 @@
     .faixa {
       align-items: stretch;
       flex-direction: column;
+    }
+
+    .filtros {
+      gap: var(--space-2);
     }
 
     /* Cada item ocupa a linha inteira e o `·` some — a regra do separador

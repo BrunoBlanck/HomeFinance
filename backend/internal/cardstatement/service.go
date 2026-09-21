@@ -220,9 +220,17 @@ func (s *Service) Upsert(ctx context.Context, ator Actor, in UpsertInput) (View,
 		// A conta é conferida DENTRO da transação da escrita: conferida fora,
 		// ela pode ter sido excluída ou arquivada entre a conferência e o
 		// INSERT (TOCTOU — spec 0004 §6.6).
-		if _, err := s.contaDeCartao(ctx, householdID, in.AccountID); err != nil {
+		cartao, err := s.contaDeCartao(ctx, householdID, in.AccountID)
+		if err != nil {
 			return err
 		}
+		// O que é GRAVADO é o id que o banco devolveu, e não o que o chamador
+		// pediu: `WHERE id = ?` casa por COLLATION (o MySQL 8 ignora a caixa,
+		// o MSSQL o espaço à direita), enquanto a fatura é depois casada com a
+		// conta em Go — `fatura.AccountID != conta.ID` no lote de lançamentos,
+		// o nome da conta na tela. Guardar a string do cliente deixaria uma
+		// fatura que o SQL encontra e que o Go não liga a conta nenhuma.
+		fatura.AccountID = cartao.ID
 
 		if err := s.repo.Upsert(ctx, &fatura); err != nil {
 			return err
@@ -279,14 +287,22 @@ func (s *Service) List(ctx context.Context, ator Actor, in ListInput) (ListView,
 	// Conta do filtro conferida como da casa: id que não é meu é 404, igual a
 	// id que não existe (S1). Sem isto a resposta seria uma lista vazia, que
 	// não vaza dado mas também não é a resposta certa.
+	//
+	// O que desce para a consulta é o id CANÔNICO — mesmo motivo do Upsert: a
+	// conferência de posse é feita por uma igualdade de SQL insensível a caixa
+	// no MySQL, e o filtro não pode carregar adiante uma grafia que o resto do
+	// código não reconhece.
+	contaDoFiltro := in.AccountID
 	if in.AccountID != "" {
-		if _, err := s.contaDaCasa(ctx, householdID, in.AccountID); err != nil {
+		conta, err := s.contaDaCasa(ctx, householdID, in.AccountID)
+		if err != nil {
 			return ListView{}, err
 		}
+		contaDoFiltro = conta.ID
 	}
 
 	linhas, err := s.repo.List(ctx, householdID, ListFilter{
-		AccountID:       in.AccountID,
+		AccountID:       contaDoFiltro,
 		CompetenceMonth: in.CompetenceMonth,
 		Limit:           in.Limit,
 	})

@@ -72,6 +72,26 @@ function contagemEm(texto: string | null | undefined): number {
   return Number(achado[1].replace(/\./g, ''))
 }
 
+/** `R$ 1.234,56` → 123456. Só para SOMAR dois totais do servidor e comparar
+ *  com um terceiro — o teste não formata dinheiro, ele confere uma relação. */
+function centavosEm(valor: string): number {
+  const achado = /([\d.]*\d),(\d{2})/.exec(valor)
+  if (!achado?.[1] || !achado[2]) throw new Error(`não é um valor: ${JSON.stringify(valor)}`)
+  return Number(achado[1].replace(/\./g, '')) * 100 + Number(achado[2])
+}
+
+/** Total e contagem da faixa do relatório que está na tela — ou zero nos dois
+ *  quando o recorte está vazio (a faixa não existe no `EmptyState`). Um recorte
+ *  vazio é resultado legítimo: a casa de teste pode não ter cartão neste mês. */
+async function totalDaTela(page: Page): Promise<{ centavos: number; contagem: number }> {
+  const faixa = page.locator('p').filter({ hasText: /lançamentos?$/ }).first()
+  const vazio = page.getByText(/^Nenhuma (despesa|receita)( no (crédito|débito))? em /)
+  await expect(faixa.or(vazio)).toBeVisible()
+  if (await vazio.isVisible()) return { centavos: 0, contagem: 0 }
+  const texto = await faixa.textContent()
+  return { centavos: centavosEm(valorEm(texto)), contagem: contagemEm(texto) }
+}
+
 /** Resumo de `/lancamentos`: o "Entrou", o "Saiu" e quantas linhas o mês tem. */
 async function resumoDaLista(page: Page, mes: string) {
   await page.goto(`/lancamentos?mes=${mes}`)
@@ -217,13 +237,99 @@ test.describe('relatório por categoria', () => {
     await expect(page).not.toHaveURL(/natureza=/)
   })
 
+  /** ADR-032: "Despesas no crédito" e "Despesas no débito" são recortes de
+   *  conta da MESMA natureza `expense`. O que só este nível prova: o servidor
+   *  fecha a conta — crédito + débito = todas as contas, em dinheiro e em
+   *  contagem —, e a URL guarda a palavra em pt-BR enquanto a requisição leva
+   *  o par `kind=expense&accountGroup=…`. */
+  test('as quatro naturezas: URL com a palavra, query com o recorte, e crédito + débito fecham o total', async ({
+    page,
+  }) => {
+    const pedidos: string[] = []
+    page.on('request', (r) => {
+      if (r.url().includes('/reports/by-category')) pedidos.push(r.url())
+    })
+
+    await abrirRelatorio(page, MES)
+    const seletor = page.getByLabel('Natureza')
+    await expect(seletor.locator('option')).toHaveText([
+      'Despesas',
+      'Despesas no crédito',
+      'Despesas no débito',
+      'Receitas',
+    ])
+    const todas = await totalDaTela(page)
+    expect(todas.contagem).toBeGreaterThan(0)
+
+    // --- crédito -----------------------------------------------------------
+    await seletor.focus()
+    await seletor.selectOption('despesas-credito')
+    await expect(page).toHaveURL(/natureza=despesas-credito/)
+    await expect(page).not.toHaveURL(/accountGroup/)
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Gastos no crédito por categoria' }),
+    ).toBeVisible()
+    await expect(page).toHaveTitle('Gastos no crédito por categoria · HomeFinance')
+    await expect(page.locator('[data-atualizando]')).toHaveCount(0)
+    const credito = await totalDaTela(page)
+    // O foco não sai do seletor na troca (mesma garantia da troca para Receitas).
+    await expect(seletor).toBeFocused()
+
+    // --- débito ------------------------------------------------------------
+    await seletor.selectOption('despesas-debito')
+    await expect(page).toHaveURL(/natureza=despesas-debito/)
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Gastos no débito por categoria' }),
+    ).toBeVisible()
+    await expect(page).toHaveTitle('Gastos no débito por categoria · HomeFinance')
+    await expect(page.locator('[data-atualizando]')).toHaveCount(0)
+    const debito = await totalDaTela(page)
+
+    // A relação que o contrato promete (ADR-032): os dois recortes somam o
+    // todo, em centavos e em lançamentos. Nenhum número foi calculado aqui —
+    // os três vieram do servidor, e só se confere que fecham.
+    expect(credito.centavos + debito.centavos).toBe(todas.centavos)
+    expect(credito.contagem + debito.contagem).toBe(todas.contagem)
+
+    // --- de volta a Despesas, e Receitas ----------------------------------
+    await seletor.selectOption('despesas')
+    await expect(page).not.toHaveURL(/natureza=/)
+    await expect(page.getByRole('heading', { level: 1, name: 'Gastos por categoria' })).toBeVisible()
+    await seletor.selectOption('receitas')
+    await expect(page).toHaveURL(/natureza=receitas/)
+    await expect(page.getByRole('heading', { level: 1, name: 'Receitas por categoria' })).toBeVisible()
+
+    // As requisições que efetivamente saíram: o recorte só viaja como
+    // `accountGroup=credit|debit`, uma vez por pedido, e nunca com Receitas.
+    const recortes = pedidos.map((url) => new URL(url).searchParams.getAll('accountGroup'))
+    expect(recortes.some((r) => r[0] === 'credit')).toBe(true)
+    expect(recortes.some((r) => r[0] === 'debit')).toBe(true)
+    for (const r of recortes) expect(r.length).toBeLessThanOrEqual(1)
+    for (const url of pedidos) {
+      const busca = new URL(url).searchParams
+      if (busca.get('kind') === 'income') expect(busca.has('accountGroup')).toBe(false)
+      expect(url).not.toContain('accountGroup=&')
+      expect(url.endsWith('accountGroup=')).toBe(false)
+      expect(url).not.toContain('natureza')
+    }
+  })
+
   test('`?natureza` hostil cai em despesas e NADA dela chega à API', async ({ page }) => {
     const pedidos: string[] = []
     page.on('request', (r) => {
       if (r.url().includes('/reports/by-category')) pedidos.push(r.url())
     })
 
-    for (const hostil of ["' OR 1=1 --", '<script>alert(1)</script>', 'expense', 'TUDO']) {
+    // `credit` e `Despesas-Credito` são os "quase" do ADR-032: o valor da API e
+    // a caixa errada. Nenhum dos dois vira recorte.
+    for (const hostil of [
+      "' OR 1=1 --",
+      '<script>alert(1)</script>',
+      'expense',
+      'TUDO',
+      'credit',
+      'Despesas-Credito',
+    ]) {
       await abrirRelatorio(page, MES, encodeURIComponent(hostil))
       await expect(page.getByRole('heading', { level: 1, name: 'Gastos por categoria' })).toBeVisible()
     }
@@ -232,6 +338,7 @@ test.describe('relatório por categoria', () => {
     for (const url of pedidos) {
       expect(url).toContain('kind=expense')
       expect(url).not.toContain('natureza')
+      expect(url).not.toContain('accountGroup')
       expect(url).not.toContain('OR+1%3D1')
       expect(url).not.toContain('script')
     }
@@ -276,15 +383,21 @@ test.describe('relatório por categoria', () => {
     // A linha precisa ser de DESPESA: o `<select>` do atalho só oferece
     // categorias da natureza do lançamento, e a categoria hostil é de despesa.
     // A primeira lacuna da tela é a mais recente do mês — que aqui é a receita
-    // do salário, e foi nela que a primeira versão deste teste bateu.
+    // (`Tarvin Exemplo`), e foi nela que a primeira versão deste teste bateu.
+    //
+    // `Dornek Exemplo` chamava-se `Mercado Exemplo` até 18/09/2026. Com a
+    // semente de categorias (ADR-033) `MERCADO` casa «supermercado» por
+    // aproximação (89) e a linha entraria JÁ categorizada — não haveria lacuna
+    // nenhuma para clicar aqui. O nome inventado é o que mantém este cenário
+    // vivo; ver `importacao.spec.ts`, que é quem cria estas linhas.
     const lacuna = page
-      .getByRole('button', { name: /^Sem categoria\. Categorizar Mercado Exemplo,/ })
+      .getByRole('button', { name: /^Sem categoria\. Categorizar Dornek Exemplo,/ })
       .filter({ visible: true })
       .first()
     await expect(lacuna).toBeVisible()
     await lacuna.click()
 
-    const seletor = page.getByRole('combobox', { name: /^Categoria de Mercado Exemplo,/ })
+    const seletor = page.getByRole('combobox', { name: /^Categoria de Dornek Exemplo,/ })
     await expect(seletor).toBeVisible()
     await seletor.selectOption({ label: NOME_HOSTIL })
     await Promise.all([

@@ -60,7 +60,7 @@ test.describe('autenticação', () => {
     expect(visivelAoScript).toBe('')
 
     // Sair.
-    await page.getByRole('button', { name: 'Conta de Bruno Blanck' }).click()
+    await page.getByRole('button', { name: 'Menu de Bruno Blanck' }).click()
     await page.getByRole('button', { name: 'Sair' }).click()
     await expect(page.getByRole('heading', { name: 'Entrar' })).toBeVisible()
     await expect(page).toHaveURL('/entrar')
@@ -81,7 +81,7 @@ test.describe('autenticação', () => {
     await confirmar(page, email)
     await expect(page.getByRole('heading', { name: 'Olá, Ana.' })).toBeVisible()
 
-    await page.getByRole('button', { name: 'Conta de Ana Souza' }).click()
+    await page.getByRole('button', { name: 'Menu de Ana Souza' }).click()
     await page.getByRole('button', { name: 'Sair' }).click()
     await expect(page.getByRole('heading', { name: 'Entrar' })).toBeVisible()
 

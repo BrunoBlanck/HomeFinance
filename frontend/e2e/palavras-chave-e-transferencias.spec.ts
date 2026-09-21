@@ -2,10 +2,10 @@ import { expect, type Locator, type Page, test } from '@playwright/test'
 
 /** Ponta a ponta da E2c (spec 0005 §8.12), contra a API Go real:
  *
- *  1. cadastrar a palavra-chave «supermercado» em Alimentação → importar um
- *     extrato com "MERCADO DO SEU JOSE" → a linha vem com a categoria JÁ
- *     selecionada e a proveniência em texto (`88% · «supermercado»`) →
- *     confirmar → em `/lancamentos` o lançamento tem a categoria;
+ *  1. cadastrar a palavra-chave «zumbra» em "QA Feira" → importar um extrato
+ *     com "ZUMBRALINO DO SEU JOSE" → a linha vem com a categoria JÁ
+ *     selecionada e a proveniência em texto (`88% · «zumbra»`) → confirmar →
+ *     em `/lancamentos` o lançamento tem a categoria;
  *  2. duas contas A e B, B com a palavra-chave «nubank» → o extrato de A com
  *     "Transferência enviada pelo Pix - NUBANK" cai no bloco "Transferências
  *     detectadas", barrado → "Aceitar as N transferências sugeridas" → o par
@@ -33,7 +33,30 @@ import { expect, type Locator, type Page, test } from '@playwright/test'
  *
  *  Compartilha a casa do projeto `setup` (ver `e2e/sessao.setup.ts`), roda em
  *  série e usa nomes e um MÊS próprios (julho de 2026; junho para o cenário 5)
- *  para não colidir com o que as outras specs criaram em agosto e setembro. */
+ *  para não colidir com o que as outras specs criaram em agosto e setembro.
+ *
+ *  ## Grupos próprios e nomes inventados (ADR-033, 18/09/2026)
+ *
+ *  Este spec cadastrava as palavras em "Alimentação", "Saúde", "Transporte" e
+ *  "Serviços", e as fixtures se chamavam MERCADO, FARMACIA, SALARIO, POSTO,
+ *  PADARIA e CAFE. A semente de categorias derrubou as duas coisas:
+ *
+ *  - os quatro grupos nasceram **com filhas**, e grupo com filha esconde o
+ *    campo de palavras-chave (spec 0005 §12) e some do `<select>` (§13). O
+ *    assunto destes cenários é a UX do campo de fichas e o fluxo do 409, não a
+ *    taxonomia — então o spec cria **grupos próprios sem filhas** (`QA Feira`,
+ *    `QA Trajeto`, `QA Cuidado`, `QA Servico`) e usa eles;
+ *  - as seis descrições passaram a ser reconhecidas de fábrica, e o cenário 3
+ *    precisa de linhas que cheguem SEM categoria. Os nomes novos —
+ *    `ZUMBRALINO`, `VRANDIX`, `TARVIN`, `PLINTAQ`, `KREVOL`, `GLIMPO` — foram
+ *    conferidos contra o motor real (`internal/textmatch` + a lista de
+ *    `internal/category/seed.go`) e não alcançam o limiar de 80 em nenhum dos
+ *    dois lados do dinheiro.
+ *
+ *  A aritmética do cenário 1 foi **preservada de propósito**: «zumbra» (6
+ *  runas) dentro de `ZUMBRALINO` (10) dá os mesmos 88 que «supermercado» dava
+ *  em `MERCADO`, pela regra 2 da §3 (contenção total, 70 + 30·6/10). A
+ *  pontuação continua saindo do motor, e continua sendo 88. */
 
 test.describe.configure({ mode: 'serial' })
 
@@ -46,6 +69,14 @@ const MES = '2026-07'
 const CONTA_C = 'Bradesco QA'
 const CONTA_D = 'Inter QA'
 const MES_REPROCESSAR = '2026-06'
+
+/** Os grupos PRÓPRIOS deste spec, criados sem subcategoria: são eles que
+ *  aceitam palavra-chave e aparecem como opção no `<select>`. Ver o cabeçalho
+ *  para o porquê de não serem mais os grupos da semente. */
+const GRUPO_FEIRA = 'QA Feira'
+const GRUPO_TRAJETO = 'QA Trajeto'
+const GRUPO_CUIDADO = 'QA Cuidado'
+const GRUPO_SERVICO = 'QA Servico'
 
 /** Extratos no formato do Nubank (`Data,Valor,Identificador,Descrição`;
  *  negativo é saída). O Identificador é a chave natural da deduplicação, por
@@ -63,13 +94,14 @@ function extratoCSV(linhas: readonly Linha[], mes = '07'): Buffer {
   return Buffer.from(cabecalho + corpo, 'utf-8')
 }
 
-/** Cenário 1: uma linha que casa por APROXIMAÇÃO com «supermercado» (88, regra
- *  2 da §3) e três que não casam com nada — ficam sem categoria para o cenário 3. */
+/** Cenário 1: uma linha que casa por APROXIMAÇÃO com «zumbra» (88, regra 2 da
+ *  §3 — `zumbra` inteira dentro de `zumbralino`) e três que não casam com nada,
+ *  nem com a semente: ficam sem categoria para o cenário 3. */
 const EXTRATO_CATEGORIAS: readonly Linha[] = [
-  { dia: '03', valor: '-50.00', id: '01', descricao: 'MERCADO DO SEU JOSE' },
-  { dia: '07', valor: '-19.90', id: '02', descricao: 'FARMACIA QA EXEMPLO' },
-  { dia: '12', valor: '1200.00', id: '03', descricao: 'SALARIO QA EXEMPLO' },
-  { dia: '20', valor: '-33.00', id: '04', descricao: 'POSTO QA EXEMPLO' },
+  { dia: '03', valor: '-50.00', id: '01', descricao: 'ZUMBRALINO DO SEU JOSE' },
+  { dia: '07', valor: '-19.90', id: '02', descricao: 'VRANDIX QA EXEMPLO' },
+  { dia: '12', valor: '1200.00', id: '03', descricao: 'TARVIN QA EXEMPLO' },
+  { dia: '20', valor: '-33.00', id: '04', descricao: 'PLINTAQ QA EXEMPLO' },
 ]
 
 /** Cenário 2, extrato de A: duas saídas para a Nubank (o sanitizador do
@@ -77,7 +109,7 @@ const EXTRATO_CATEGORIAS: readonly Linha[] = [
  *  fica no bloco "Prontas" para provar que "aceitar todas" não a toca. */
 const EXTRATO_A: readonly Linha[] = [
   { dia: '15', valor: '-150.00', id: '11', descricao: 'Transferência enviada pelo Pix - NUBANK' },
-  { dia: '16', valor: '-12.00', id: '12', descricao: 'PADARIA QA EXEMPLO' },
+  { dia: '16', valor: '-12.00', id: '12', descricao: 'KREVOL QA EXEMPLO' },
   { dia: '22', valor: '-25.00', id: '13', descricao: 'Transferência enviada pelo Pix - NUBANK' },
 ]
 
@@ -85,7 +117,7 @@ const EXTRATO_A: readonly Linha[] = [
  *  depois — a janela é de ±3 dias) e uma compra comum. */
 const EXTRATO_B: readonly Linha[] = [
   { dia: '15', valor: '150.00', id: '21', descricao: 'Transferência recebida pelo Pix - ITAU QA' },
-  { dia: '18', valor: '-8.50', id: '22', descricao: 'CAFE QA EXEMPLO' },
+  { dia: '18', valor: '-8.50', id: '22', descricao: 'GLIMPO QA EXEMPLO' },
   { dia: '23', valor: '25.00', id: '23', descricao: 'Transferência recebida pelo Pix - ITAU QA' },
 ]
 
@@ -111,6 +143,23 @@ function campoDePalavras(escopo: Page | Locator): Locator {
 
 function fichas(escopo: Page | Locator): Locator {
   return escopo.getByRole('list', { name: 'Palavras-chave adicionadas' }).getByRole('listitem')
+}
+
+/** Cria um GRUPO de despesa sem subcategoria — o dono de palavra-chave e o
+ *  destino selecionável que os grupos da semente deixaram de ser. */
+async function criarGrupoDeDespesa(page: Page, nome: string): Promise<void> {
+  await page.goto('/categorias')
+  await page.getByRole('button', { name: 'Novo grupo', exact: true }).click()
+  const dialogo = page.locator('dialog[open]')
+  await dialogo.getByLabel('Nome').fill(nome)
+  // Explícito, e não pelo padrão do formulário: um grupo que nascesse de
+  // receita apareceria no `<select>` errado e o teste morreria longe daqui.
+  await dialogo.getByLabel('Natureza').selectOption('expense')
+  await dialogo.getByRole('button', { name: /^Criar/ }).click()
+  await expect(dialogo).toHaveCount(0)
+  await expect(
+    page.getByRole('region', { name: 'Despesas' }).getByText(nome, { exact: true }),
+  ).toBeVisible()
 }
 
 async function criarConta(page: Page, nome: string, palavra?: string): Promise<void> {
@@ -224,11 +273,19 @@ async function descricaoNativa(page: Page, elemento: Locator): Promise<string> {
 // ------------------------------------------------------------------ cenários
 
 test.describe('palavras-chave e categorização na importação', () => {
-  test('a palavra-chave «supermercado» entra em Alimentação pelo diálogo, com teclado', async ({
-    page,
-  }) => {
+  test('os quatro grupos próprios do spec existem, sem subcategoria', async ({ page }) => {
+    // Grupo da SEMENTE não serve aqui: os 14 que têm filhas escondem o campo de
+    // palavras-chave (spec 0005 §12) e não são opção de `<select>` (§13). Quem
+    // testa o campo de fichas e o 409 precisa de um grupo FOLHA, e é isso que
+    // estes quatro são.
+    for (const nome of [GRUPO_FEIRA, GRUPO_TRAJETO, GRUPO_CUIDADO, GRUPO_SERVICO]) {
+      await criarGrupoDeDespesa(page, nome)
+    }
+  })
+
+  test('a palavra-chave «zumbra» entra em QA Feira pelo diálogo, com teclado', async ({ page }) => {
     await page.goto('/categorias')
-    await page.getByRole('button', { name: 'Editar Alimentação' }).click()
+    await page.getByRole('button', { name: `Editar ${GRUPO_FEIRA}` }).click()
 
     // `<dialog>` NATIVO, aberto — no jsdom ele é polyfill; aqui é o do Chromium.
     const dialogo = page.locator('dialog[open]')
@@ -244,27 +301,27 @@ test.describe('palavras-chave e categorização na importação', () => {
     )
 
     // Enter adiciona e NÃO submete: o diálogo continua aberto.
-    await input.fill('supermercado')
+    await input.fill('zumbra')
     await input.press('Enter')
-    await expect(fichas(dialogo)).toHaveText(['supermercado'])
+    await expect(fichas(dialogo)).toHaveText(['zumbra'])
     await expect(input).toHaveValue('')
     await expect(dialogo).toBeVisible()
     await expect(dialogo.getByRole('status')).toHaveText('1 de 20')
 
     // Vírgula também adiciona; ← no início do input leva ao × da última ficha;
     // Delete remove e devolve o foco à ficha anterior; → volta ao input.
-    await input.pressSequentially('mercadinho,')
-    await expect(fichas(dialogo)).toHaveText(['supermercado', 'mercadinho'])
+    await input.pressSequentially('zumbrete,')
+    await expect(fichas(dialogo)).toHaveText(['zumbra', 'zumbrete'])
     await input.press('ArrowLeft')
-    await expect(dialogo.getByRole('button', { name: 'Remover mercadinho' })).toBeFocused()
+    await expect(dialogo.getByRole('button', { name: 'Remover zumbrete' })).toBeFocused()
     await page.keyboard.press('Delete')
-    await expect(fichas(dialogo)).toHaveText(['supermercado'])
-    await expect(dialogo.getByRole('button', { name: 'Remover supermercado' })).toBeFocused()
+    await expect(fichas(dialogo)).toHaveText(['zumbra'])
+    await expect(dialogo.getByRole('button', { name: 'Remover zumbra' })).toBeFocused()
     await page.keyboard.press('ArrowRight')
     await expect(input).toBeFocused()
 
     // Os × não são parada de Tab: um Tab a partir do input sai do campo.
-    await expect(dialogo.getByRole('button', { name: 'Remover supermercado' })).toHaveAttribute(
+    await expect(dialogo.getByRole('button', { name: 'Remover zumbra' })).toHaveAttribute(
       'tabindex',
       '-1',
     )
@@ -274,8 +331,8 @@ test.describe('palavras-chave e categorização na importação', () => {
     await expect(dialogo).toHaveCount(0)
 
     // Reabrir traz a palavra gravada pelo servidor.
-    await page.getByRole('button', { name: 'Editar Alimentação' }).click()
-    await expect(fichas(page.locator('dialog[open]'))).toHaveText(['supermercado'])
+    await page.getByRole('button', { name: `Editar ${GRUPO_FEIRA}` }).click()
+    await expect(fichas(page.locator('dialog[open]'))).toHaveText(['zumbra'])
     await page.keyboard.press('Escape')
     await expect(page.locator('dialog[open]')).toHaveCount(0)
   })
@@ -299,22 +356,23 @@ test.describe('palavras-chave e categorização na importação', () => {
       ),
     ).toBeVisible()
 
-    // A sugestão vive no CONTROLE: o <select> nativo já vem com Alimentação
+    // A sugestão vive no CONTROLE: o <select> nativo já vem com QA Feira
     // selecionada — e a pontuação é texto, com a palavra que decidiu.
-    const mercado = categoriaDe(page, 'MERCADO DO SEU JOSE', '03/07')
-    await expect(mercado).toHaveRole('combobox')
-    await expect(mercado.locator('option:checked')).toHaveText('Alimentação')
-    await expect(page.getByText('88% · «supermercado»')).toBeVisible()
-    // Linha sem correspondência não ganha nada.
+    const aproximado = categoriaDe(page, 'ZUMBRALINO DO SEU JOSE', '03/07')
+    await expect(aproximado).toHaveRole('combobox')
+    await expect(aproximado.locator('option:checked')).toHaveText(GRUPO_FEIRA)
+    await expect(page.getByText('88% · «zumbra»')).toBeVisible()
+    // Linha sem correspondência não ganha nada — nem da palavra deste spec, nem
+    // das palavras da semente.
     await expect(
-      categoriaDe(page, 'FARMACIA QA EXEMPLO', '07/07').locator('option:checked'),
+      categoriaDe(page, 'VRANDIX QA EXEMPLO', '07/07').locator('option:checked'),
     ).toHaveText('Sem categoria')
 
-    // Limpar a sugestão apaga a proveniência; voltar a Alimentação a traz de volta.
-    await mercado.selectOption({ label: 'Sem categoria' })
-    await expect(page.getByText('88% · «supermercado»')).toHaveCount(0)
-    await mercado.selectOption({ label: 'Alimentação' })
-    await expect(page.getByText('88% · «supermercado»')).toBeVisible()
+    // Limpar a sugestão apaga a proveniência; voltar a QA Feira a traz de volta.
+    await aproximado.selectOption({ label: 'Sem categoria' })
+    await expect(page.getByText('88% · «zumbra»')).toHaveCount(0)
+    await aproximado.selectOption({ label: GRUPO_FEIRA })
+    await expect(page.getByText('88% · «zumbra»')).toBeVisible()
 
     // Sem `decisions` na requisição: aceitar a sugestão não é exceção. O que o
     // servidor grava é o `suggestedCategoryId` dele mesmo.
@@ -336,19 +394,24 @@ test.describe('palavras-chave e categorização na importação', () => {
     // Em /lancamentos o lançamento TEM a categoria, e os outros três não.
     await page.getByRole('button', { name: 'Ver os lançamentos de julho' }).click()
     await expect(page).toHaveURL(new RegExp(`/lancamentos\\?mes=${MES}`))
+    // Desde a emenda §19 o nome da categoria é o texto de um BOTÃO — o outro
+    // estado fechado do mesmo controle —, e ele existe duas vezes por linha,
+    // uma visível por faixa. A afirmação continua sendo "esta linha está em
+    // QA Feira".
     await expect(
       page
-        .getByRole('row', { name: /MERCADO DO SEU JOSE/ })
-        .getByText('Alimentação', { exact: true }),
-    ).toBeVisible()
+        .getByRole('row', { name: /ZUMBRALINO DO SEU JOSE/ })
+        .getByRole('button', { name: /^QA Feira\. Trocar categoria de ZUMBRALINO DO SEU JOSE,/ })
+        .filter({ visible: true }),
+    ).toHaveCount(1)
     // Desde a emenda §11 a célula vazia é o BOTÃO do atalho, e ele existe duas
     // vezes por linha (coluna e linha secundária do celular) — uma visível por
     // faixa de largura. O que se afirma aqui continua sendo "esta linha está
     // sem categoria"; o locator é que passou a apontar o controle.
     await expect(
       page
-        .getByRole('row', { name: /FARMACIA QA EXEMPLO/ })
-        .getByRole('button', { name: /^Sem categoria\. Categorizar FARMACIA QA EXEMPLO,/ })
+        .getByRole('row', { name: /VRANDIX QA EXEMPLO/ })
+        .getByRole('button', { name: /^Sem categoria\. Categorizar VRANDIX QA EXEMPLO,/ })
         .filter({ visible: true }),
     ).toHaveCount(1)
     await expect(faixaDePendencia(page)).toContainText('3 lançamentos de julho estão sem categoria')
@@ -389,11 +452,11 @@ test.describe('transferências detectadas, vínculo e /transferencias', () => {
       'Registrar como transferência para outra conta…',
       'Importar como despesa comum (não é transferência)',
     ])
-    // Só a Padaria está marcada para entrar: o botão diz isso.
+    // Só a compra comum está marcada para entrar: o botão diz isso.
     await expect(page.getByRole('button', { name: 'Importar 1 lançamento' })).toBeVisible()
 
-    const padaria = page.getByRole('checkbox', { name: /PADARIA QA EXEMPLO/ })
-    await expect(padaria).toBeChecked()
+    const comum = page.getByRole('checkbox', { name: /KREVOL QA EXEMPLO/ })
+    await expect(comum).toBeChecked()
 
     await page.getByRole('button', { name: 'Aceitar as 2 transferências sugeridas' }).click()
 
@@ -402,8 +465,8 @@ test.describe('transferências detectadas, vínculo e /transferencias', () => {
       'Registrar como transferência para Nubank QA',
     )
     await expect(segunda).toHaveValue('transfer')
-    // …e em NENHUMA outra linha: a Padaria continua como estava.
-    await expect(padaria).toBeChecked()
+    // …e em NENHUMA outra linha: a compra comum continua como estava.
+    await expect(comum).toBeChecked()
     await expect(page.getByRole('button', { name: 'Desfazer o aceite de todas' })).toBeVisible()
     await expect(page.getByText('Inclui 2 transferências.')).toBeVisible()
 
@@ -605,7 +668,7 @@ test.describe('transferências detectadas, vínculo e /transferencias', () => {
     await foraDaLista.click()
     await expect(tabelaDeFora).toBeVisible()
     await expect(tabelaDeFora.getByRole('row', { name: /Pix recebido - ITAU QA/ })).toHaveCount(2)
-    await expect(tabelaDeFora.getByRole('row', { name: /CAFE QA EXEMPLO/ })).toHaveCount(1)
+    await expect(tabelaDeFora.getByRole('row', { name: /GLIMPO QA EXEMPLO/ })).toHaveCount(1)
     await expect(page.getByText('Já importada nesta conta · lançamento idêntico.')).toHaveCount(3)
     await expect(page.getByRole('combobox')).toHaveCount(0)
     await expect(page.getByRole('checkbox')).toHaveCount(0)
@@ -628,13 +691,13 @@ test.describe('categorizar automaticamente', () => {
     page,
   }) => {
     // Cadastra as palavras que vão casar com o que ficou sem categoria em
-    // julho: FARMACIA (Saúde), POSTO (Transporte) e PADARIA (Alimentação, que
-    // já tem «supermercado» — a lista inteira volta com as duas).
+    // julho: VRANDIX (QA Cuidado), PLINTAQ (QA Trajeto) e KREVOL (QA Feira, que
+    // já tem «zumbra» — a lista inteira volta com as duas).
     await page.goto('/categorias')
     for (const [categoria, palavra] of [
-      ['Saúde', 'farmacia'],
-      ['Transporte', 'posto'],
-      ['Alimentação', 'padaria'],
+      [GRUPO_CUIDADO, 'vrandix'],
+      [GRUPO_TRAJETO, 'plintaq'],
+      [GRUPO_FEIRA, 'krevol'],
     ] as const) {
       await page.getByRole('button', { name: `Editar ${categoria}` }).click()
       const dialogo = page.locator('dialog[open]')
@@ -644,12 +707,12 @@ test.describe('categorizar automaticamente', () => {
       await dialogo.getByRole('button', { name: 'Salvar' }).click()
       await expect(dialogo).toHaveCount(0)
     }
-    await page.getByRole('button', { name: 'Editar Alimentação' }).click()
-    await expect(fichas(page.locator('dialog[open]'))).toHaveText(['supermercado', 'padaria'])
+    await page.getByRole('button', { name: `Editar ${GRUPO_FEIRA}` }).click()
+    await expect(fichas(page.locator('dialog[open]'))).toHaveText(['zumbra', 'krevol'])
     await page.keyboard.press('Escape')
 
     await page.goto(`/lancamentos?mes=${MES}`)
-    // Julho: FARMACIA, SALARIO, POSTO (conta A), PADARIA (A) e CAFE (B) sem
+    // Julho: VRANDIX, TARVIN, PLINTAQ (conta A), KREVOL (A) e GLIMPO (B) sem
     // categoria; as pernas de transferência não contam.
     await expect(faixaDePendencia(page)).toContainText('5 lançamentos de julho estão sem categoria')
 
@@ -668,18 +731,22 @@ test.describe('categorizar automaticamente', () => {
     await expect(
       dialogo.getByRole('rowheader', { name: /Continuam sem categoria · 2/ }),
     ).toBeVisible()
-    await expect(dialogo.getByRole('row', { name: /FARMACIA QA EXEMPLO/ })).toContainText('Saúde')
-    await expect(dialogo.getByRole('row', { name: /FARMACIA QA EXEMPLO/ })).toContainText(
-      '«farmacia»',
+    await expect(dialogo.getByRole('row', { name: /VRANDIX QA EXEMPLO/ })).toContainText(
+      GRUPO_CUIDADO,
     )
-    await expect(dialogo.getByRole('row', { name: /POSTO QA EXEMPLO/ })).toContainText('Transporte')
-    await expect(dialogo.getByRole('row', { name: /PADARIA QA EXEMPLO/ })).toContainText(
-      'Alimentação',
+    await expect(dialogo.getByRole('row', { name: /VRANDIX QA EXEMPLO/ })).toContainText(
+      '«vrandix»',
     )
-    await expect(dialogo.getByRole('row', { name: /SALARIO QA EXEMPLO/ })).toContainText(
+    await expect(dialogo.getByRole('row', { name: /PLINTAQ QA EXEMPLO/ })).toContainText(
+      GRUPO_TRAJETO,
+    )
+    await expect(dialogo.getByRole('row', { name: /KREVOL QA EXEMPLO/ })).toContainText(
+      GRUPO_FEIRA,
+    )
+    await expect(dialogo.getByRole('row', { name: /TARVIN QA EXEMPLO/ })).toContainText(
       'abaixo de 80%',
     )
-    await expect(dialogo.getByRole('row', { name: /CAFE QA EXEMPLO/ })).toContainText(
+    await expect(dialogo.getByRole('row', { name: /GLIMPO QA EXEMPLO/ })).toContainText(
       'abaixo de 80%',
     )
 
@@ -699,15 +766,22 @@ test.describe('categorizar automaticamente', () => {
     await expect(page.getByText('3 lançamentos categorizados.')).toBeVisible()
     await expect(dialogo).toHaveCount(0)
     await expect(faixaDePendencia(page)).toContainText('2 lançamentos de julho estão sem categoria')
+    // Desde a emenda §19 o nome da categoria é o texto de um BOTÃO (o outro
+    // estado fechado do mesmo controle), e ele existe duas vezes por linha —
+    // uma visível por faixa de largura, como já acontecia com a lacuna.
     await expect(
-      page.getByRole('row', { name: /FARMACIA QA EXEMPLO/ }).getByText('Saúde', { exact: true }),
-    ).toBeVisible()
+      page
+        .getByRole('row', { name: /VRANDIX QA EXEMPLO/ })
+        .getByRole('button', { name: /^QA Cuidado\. Trocar categoria de VRANDIX QA EXEMPLO,/ })
+        .filter({ visible: true }),
+    ).toHaveCount(1)
     // O que já tinha categoria não mudou.
     await expect(
       page
-        .getByRole('row', { name: /MERCADO DO SEU JOSE/ })
-        .getByText('Alimentação', { exact: true }),
-    ).toBeVisible()
+        .getByRole('row', { name: /ZUMBRALINO DO SEU JOSE/ })
+        .getByRole('button', { name: /^QA Feira\. Trocar categoria de ZUMBRALINO DO SEU JOSE,/ })
+        .filter({ visible: true }),
+    ).toHaveCount(1)
 
     // Idempotente: rodar de novo não acha nada — e o botão explica em vez de apagar.
     await page.getByRole('button', { name: 'Categorizar automaticamente' }).click()
@@ -731,14 +805,14 @@ test.describe('palavra-chave duplicada', () => {
     page,
   }) => {
     await page.goto('/categorias')
-    await page.getByRole('button', { name: 'Editar Serviços' }).click()
+    await page.getByRole('button', { name: `Editar ${GRUPO_SERVICO}` }).click()
     const dialogo = page.locator('dialog[open]')
 
     const input = campoDePalavras(dialogo)
     // Caixa diferente de propósito: a unicidade é pela forma normalizada.
-    await input.fill('Supermercado')
+    await input.fill('Zumbra')
     await input.press('Enter')
-    await expect(fichas(dialogo)).toHaveText(['Supermercado'])
+    await expect(fichas(dialogo)).toHaveText(['Zumbra'])
 
     const [resposta] = await Promise.all([
       page.waitForResponse(
@@ -753,11 +827,11 @@ test.describe('palavra-chave duplicada', () => {
     expect(corpo.error.code).toBe('KEYWORD_TAKEN')
     // A palavra recusada volta como foi enviada; a ficha é achada pela forma
     // normalizada, então caixa e acento não importam aqui.
-    expect(corpo.error.fields.keyword?.toLowerCase()).toBe('supermercado')
+    expect(corpo.error.fields.keyword?.toLowerCase()).toBe('zumbra')
 
     // A frase é nossa, com a palavra como foi digitada e a dona pelo NOME —
     // o `ownerId` nunca aparece cru. O diálogo fica aberto para corrigir.
-    await expect(dialogo.getByText('«Supermercado» já está em Alimentação.')).toBeVisible()
+    await expect(dialogo.getByText(`«Zumbra» já está em ${GRUPO_FEIRA}.`)).toBeVisible()
     await expect(dialogo.getByText(corpo.error.fields.ownerId ?? 'id-que-nao-existe')).toHaveCount(
       0,
     )
@@ -767,9 +841,9 @@ test.describe('palavra-chave duplicada', () => {
     await expect(ficha).toHaveAttribute('data-invalid', 'true')
     expect(await ficha.locator('svg').count()).toBe(2)
     // ...e continua removível — removê-la limpa o erro.
-    await dialogo.getByRole('button', { name: 'Remover Supermercado' }).click()
+    await dialogo.getByRole('button', { name: 'Remover Zumbra' }).click()
     await expect(fichas(dialogo)).toHaveCount(0)
-    await expect(dialogo.getByText('«Supermercado» já está em Alimentação.')).toHaveCount(0)
+    await expect(dialogo.getByText(`«Zumbra» já está em ${GRUPO_FEIRA}.`)).toHaveCount(0)
     await expect(input).not.toHaveAttribute('aria-invalid')
 
     await dialogo.getByRole('button', { name: 'Cancelar' }).click()
@@ -791,8 +865,8 @@ test.describe('palavra-chave duplicada', () => {
     await expect(dialogo.getByText(`«nubank» já está na conta ${CONTA_B}.`)).toBeVisible()
     await dialogo.getByRole('button', { name: 'Remover nubank' }).click()
 
-    // «supermercado» está numa CATEGORIA; em conta é outro conjunto: 2xx.
-    await input.fill('supermercado')
+    // «zumbra» está numa CATEGORIA; em conta é outro conjunto: 2xx.
+    await input.fill('zumbra')
     await input.press('Enter')
     await dialogo.getByRole('button', { name: 'Salvar' }).click()
     await expect(page.getByText('Conta atualizada.')).toBeVisible()

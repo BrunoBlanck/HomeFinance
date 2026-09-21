@@ -44,12 +44,30 @@ type Transactor interface {
 
 // Service concentra a regra de negócio das categorias.
 type Service struct {
-	repo  Repository
-	tx    Transactor
-	audit Auditor
-	usage []UsageChecker
-	ids   id.Generator
-	clock func() time.Time
+	repo     Repository
+	appender KeywordAppender
+	tx       Transactor
+	audit    Auditor
+	usage    []UsageChecker
+	ids      id.Generator
+	clock    func() time.Time
+}
+
+// KeywordAppender é a escrita ADITIVA de palavras-chave — a única que o import
+// de IA usa (spec 0010 §10.4, achado A2 da revisão de segurança da E9b).
+//
+// É uma interface SEPARADA de Repository, e não um método a mais nele, por
+// duas razões: ninguém além do import acrescenta sem substituir (as rotas de
+// escrita existentes continuam em ReplaceKeywords, pela lista inteira), e um
+// método novo em Repository obrigaria todo dublê da suíte a implementar uma
+// escrita que nunca exercita. gormstore.CategoryRepository a satisfaz; a
+// montagem é por WithKeywordAppender, em cmd/api.
+type KeywordAppender interface {
+	// AppendKeywords insere SÓ as palavras dadas, na transação em curso,
+	// continuando a numeração de Position lida no banco e reconferindo o
+	// teto por dona. Colisão no índice único volta como ErrKeywordTaken;
+	// passar do teto, como ErrTooManyKeywords. Nada é apagado.
+	AppendKeywords(ctx context.Context, householdID, categoryID string, kws []Keyword) error
 }
 
 // Option configura o Service.
@@ -64,6 +82,11 @@ func WithClock(c func() time.Time) Option { return func(s *Service) { s.clock = 
 // WithAudit liga o rastro de auditoria. Sem ele o serviço funciona — os testes
 // de unidade não precisam de auditoria para exercitar regra de negócio.
 func WithAudit(a Auditor) Option { return func(s *Service) { s.audit = a } }
+
+// WithKeywordAppender liga a escrita aditiva de palavras-chave (o import de
+// IA). Sem ela, AppendKeywords devolve erro — nunca cai num ReplaceKeywords
+// disfarçado.
+func WithKeywordAppender(a KeywordAppender) Option { return func(s *Service) { s.appender = a } }
 
 // WithUsageCheckers registra quem sabe dizer se uma categoria está em uso.
 func WithUsageCheckers(checkers ...UsageChecker) Option {
@@ -690,17 +713,29 @@ func (s *Service) gravarPalavras(ctx context.Context, householdID, categoryID st
 			}
 		}
 	}
-	now := s.clock()
+	s.preencherPalavras(kws, householdID, categoryID, s.clock())
+	if err := s.repo.ReplaceKeywords(ctx, householdID, categoryID, kws); err != nil {
+		return fmt.Errorf("gravando palavras-chave: %w", err)
+	}
+	return nil
+}
+
+// preencherPalavras completa, NO LUGAR, o que é do SERVIDOR em cada
+// palavra-chave: id, casa, categoria e instante. O que vem do cliente
+// (Keyword, Norm, Position) já chegou validado por ValidateKeywords.
+//
+// Existe como helper porque tem DOIS chamadores — gravarPalavras (a edição
+// feita por uma pessoa) e semearPalavras (a semente de casa nova) — e duas
+// cópias deste preenchimento divergiriam: a segunda é sempre a esquecida, e
+// seria por ela que uma palavra entraria sem `household_id`, escapando do
+// escopo por casa que o repositório confere.
+func (s *Service) preencherPalavras(kws []Keyword, householdID, categoryID string, now time.Time) {
 	for i := range kws {
 		kws[i].ID = s.ids()
 		kws[i].HouseholdID = householdID
 		kws[i].CategoryID = categoryID
 		kws[i].CreatedAt = now
 	}
-	if err := s.repo.ReplaceKeywords(ctx, householdID, categoryID, kws); err != nil {
-		return fmt.Errorf("gravando palavras-chave: %w", err)
-	}
-	return nil
 }
 
 // escreverComPalavras executa a operação (uma transação inteira) e resolve a
@@ -790,6 +825,87 @@ func norms(kws []Keyword) []string {
 		out = append(out, k.Norm)
 	}
 	return out
+}
+
+// AppendKeywords ACRESCENTA palavras-chave a UMA categoria da casa do token,
+// DENTRO da transação que o chamador já abriu — é a única extração que a
+// spec 0010 (§10.4) autorizou para o import de IA, e ela reúsa
+// podeReceberPalavras, preencherPalavras e registrar sem alterar uma linha
+// deles.
+//
+// Por que ACRESCENTA, e não substitui (achado A2 da revisão de segurança da
+// E9b): a primeira versão montava a UNIÃO (atuais lidas num índice + novas) e
+// passava por ReplaceKeywords, que é DELETE + INSERT. Em READ COMMITTED, uma
+// palavra comitada por outra transação entre a leitura do índice e a escrita
+// era apagada pelo DELETE e não voltava — sumia sem erro, numa operação
+// anunciada como aditiva. Inserindo só as aprovadas, não há DELETE: o índice
+// único (household_id, keyword_norm) decide a corrida como ErrKeywordTaken, e
+// a numeração de Position e o teto por dona são relidos no banco, na mesma
+// transação (KeywordAppender).
+//
+// O que ela NÃO faz, e é o ponto:
+//
+//   - não abre transação. Quem chama já está dentro do UnitOfWork; abrir
+//     outra aqui seria reentrar na mesma;
+//   - não tem retentativa. A corrida do índice único sobe como veio, e a
+//     resposta certa é o chamador desfazer o lote inteiro (409 CONFLICT);
+//   - não expõe nada além do acréscimo: nome, natureza, pai e arquivamento
+//     continuam só pelo Update, e remover palavra continua só pelo diálogo.
+//
+// As guardas de forma (teto e repetição por norma) são defesa em
+// profundidade sobre uma lista que o chamador já validou palavra a palavra;
+// nenhuma delas ecoa a palavra. A casa é a do ATOR — ByID reconfere que a
+// categoria é dela antes de qualquer escrita, e um id de outra casa é
+// ErrNotFound. Position vindo do chamador é ignorado: quem numera é o banco.
+//
+// `action` é a ação de auditoria gravada (audit.ActionCategoryUpdated no
+// import): o rastro é o evento que já existia (spec 0005 §4.1.5), sem as
+// palavras — só ação, entidade, id, ator e IP.
+func (s *Service) AppendKeywords(ctx context.Context, ator Actor, categoryID string, kws []Keyword, action string) error {
+	householdID := ator.HouseholdID
+	if householdID == "" {
+		return ErrNotFound
+	}
+	if action == "" {
+		return fmt.Errorf("acrescentando palavras-chave: ação de auditoria ausente")
+	}
+	if s.appender == nil {
+		return fmt.Errorf("acrescentando palavras-chave: escrita aditiva não configurada")
+	}
+	if len(kws) == 0 {
+		return nil
+	}
+	if len(kws) > MaxKeywordsPerOwner {
+		return fmt.Errorf("%w: máximo de %d", ErrTooManyKeywords, MaxKeywordsPerOwner)
+	}
+	vistas := make(map[string]struct{}, len(kws))
+	for i := range kws {
+		if kws[i].Keyword == "" || kws[i].Norm == "" {
+			return &KeywordValidationError{Index: i, Err: ErrInvalidKeyword}
+		}
+		if _, repetida := vistas[kws[i].Norm]; repetida {
+			return &KeywordValidationError{Index: i, Err: ErrDuplicateKeyword}
+		}
+		vistas[kws[i].Norm] = struct{}{}
+	}
+
+	current, err := s.repo.ByID(ctx, householdID, categoryID)
+	if err != nil {
+		return err
+	}
+	if err := s.podeReceberPalavras(ctx, current, kws); err != nil {
+		return err
+	}
+	now := s.clock()
+	s.preencherPalavras(kws, householdID, current.ID, now)
+	if err := s.appender.AppendKeywords(ctx, householdID, current.ID, kws); err != nil {
+		return err
+	}
+	current.UpdatedAt = now
+	if err := s.repo.Update(ctx, current); err != nil {
+		return err
+	}
+	return s.registrar(ctx, ator, action, current.ID)
 }
 
 // palavrasPorDona carrega as palavras-chave da casa em UMA consulta e as

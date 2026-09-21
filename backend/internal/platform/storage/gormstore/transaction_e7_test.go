@@ -157,6 +157,7 @@ func TestSummarySemCategoriaDeInvestimentoEmiteOSQLDeSempre(t *testing.T) {
 			"lista só com string vazia é lista vazia: o CASE não pode entrar")
 		assert.NotContains(t, semNada.SQL, "category_id IN", "IN () nunca é emitido (ADR-029f)")
 		assert.NotContains(t, semNada.SQL, "marked_total")
+		assert.NotContains(t, semNada.SQL, "marked_cnt")
 		assert.Contains(t, semNada.SQL, "SUM(CASE WHEN category_id IS NULL THEN 1 ELSE 0 END) AS uncategorized",
 			"a projeção de sempre continua inteira")
 		assert.Equal(t, 2, semNada.Parametros, "casa + mês, como antes do E7")
@@ -167,7 +168,11 @@ func TestSummarySemCategoriaDeInvestimentoEmiteOSQLDeSempre(t *testing.T) {
 		resgate := s.makeCategory(t, ctx, minha.ID, "Resgate", category.KindRedemption, nil)
 		comIDs := emitido(t, []string{cdb.ID, resgate.ID})
 		assert.Contains(t, comIDs.SQL, "marked_total")
-		assert.Equal(t, 4, comIDs.Parametros, "2 categorias + casa + mês")
+		assert.Contains(t, comIDs.SQL, "marked_cnt",
+			"a contagem marcada entrou com o filtro de tipo (E2d): é dela que sai a "+
+				"contagem dos cinco recortes, por aritmética sobre a mesma linha")
+		assert.Equal(t, 6, comIDs.Parametros,
+			"2 categorias em marked_total + 2 em marked_cnt + casa + mês")
 	})
 }
 

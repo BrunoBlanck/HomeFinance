@@ -350,6 +350,8 @@ categoria) · 422 quando a natureza da categoria não combina com o `kind` ou a 
 auditoria `transaction.updated` (id do lançamento; sem valor, sem descrição).
 
 **Fora:** editar valor/data/descrição/conta (E2b); recategorizar em massa o que já tem categoria (§2.2).
+**Atualizado em 18/09/2026:** a recategorização **individual** — trocar a categoria de uma linha que já tem
+uma — saiu deste *Fora* e entrou na §19, sem mudança de contrato. Massa continua fora.
 
 **Critérios de aceite:** (a) `PATCH` com `categoryId` de outra casa → 404 e nada gravado; em perna de
 transferência → 422; `income` com categoria `expense` → 422; arquivada → 422; campo além de `categoryId`
@@ -772,3 +774,232 @@ Cinco rodadas de revisão de segurança: BLOQUEADO (A1 CPU sem teto, A2 `Burst`/
 `internal/report/**`, `platform/storage/ctxerr.go` e `gormstore/category_repository.go` estão
 **untracked** no git. O "congelamento por hash" da entrega vizinha **não é verificável por git** neste
 estado — quem depender dele precisa guardar a lista de hashes fora do git, ou comitar os caminhos.
+
+## 19. Emenda de 18/09/2026 — recategorizar uma linha já categorizada em `/lancamentos` (pedido do usuário)
+
+**Pedido literal:** "No menu de Lançamentos tem que ter como a qualquer momento eu manualmente alterar um
+lançamento de categoria."
+
+**Decisão.** Antecipa-se da E2b **apenas a troca de categoria** — nada do `PATCH` completo (valor, data,
+descrição, conta continuam lá). O caminho já existe: o `PATCH /transactions/{id}` com `{ categoryId }` da
+§11 tem contrato de **substituição**, não de preenchimento, e o servidor já responde 200 trocando a
+categoria de uma linha que tinha outra. Logo: **nenhuma mudança de contrato, de schema, de filtro, de
+`summary` ou de rate limit** — a emenda é de interface. Isto **revoga** a frase "recategorizar em massa o
+que já tem categoria" da §11 *Fora* na parte individual: massa continua fora (§2.2), linha a linha entra
+aqui.
+
+**Comportamento** (desenho normativo em `docs/DESIGN.md`, E2c (h) §1-bis, §2, §3 e §4 "Depois de trocar"):
+
+1. A célula de uma linha `income`/`expense` **já categorizada** deixa de ser um `<span>` e passa a ser o
+   **mesmo controle** da lacuna, no outro estado fechado: o nome da categoria com o chevron, caixa
+   invisível (`border: 1px solid transparent`), tinta herdada do lugar. Um componente, dois estados
+   fechados, um aberto — *fechado difere, aberto é o mesmo*. O tracejado continua **exclusivo da
+   pendência**. Perna de transferência continua sem controle nenhum.
+2. Abre o **mesmo editor**, em modo *trocar*: legenda `Trocar categoria de {rótulo}`, `<select>` já na
+   categoria atual quando ela ainda é escolhível. Não sendo (arquivada, ou grupo que ganhou
+   subcategorias), abre no placeholder com uma nota que **diz qual dos dois motivos** é.
+3. **Confirmar com a categoria atual não emite requisição**: o botão é `aria-disabled` com o rótulo
+   `Escolha outra categoria` e o clique leva ao campo. Não existe "trocar para a mesma" — o servidor
+   responderia 200 sem escrever, e um toast de troca que não trocou nada seria mentira. As fichas de
+   aprender também só existem com escolha **diferente** da atual.
+4. **Só este:** um `PATCH /transactions/{id}` `{ categoryId }` → toast `Categoria trocada de Transporte
+   para Lazer.` (anterior não resolvível: `Categoria trocada para Lazer.`) e **o foco volta ao controle da
+   própria linha**, agora com o nome novo. Não existe "próxima lacuna" no modo trocar: quem troca uma
+   categoria está trabalhando nesta linha, não varrendo pendências.
+5. **Com palavra-chave:** a mesma sequência (a) → (b) → (c) da §11.3, com duas notas: (c) continua
+   tocando **só** os lançamentos sem categoria do mês (§4.3) — trocar uma linha nunca recategoriza outra
+   que já tinha dona —, e a palavra que já é da categoria **anterior** leva 409, caso em que **nada mais é
+   feito**, como na §11. No toast, a troca desta linha vem **primeiro**: `Categoria trocada de Transporte
+   para Lazer · «uber» adicionada a Lazer · mais 3 lançamentos de setembro categorizados.`
+6. **Sob `?tipo=`, a linha pode sair da lista** quando a categoria nova contradiz o filtro — inclusive o
+   caso novo `investimentos` → categoria de despesa ou de receita. A saída é **anunciada no toast**
+   (segunda frase de E2d (g), mesmo molde), e o foco vai ao controle da linha **vizinha na foto de
+   antes** → `Carregar mais` → `<h1>`. Com `?semCategoria=1` não há linha categorizada na tela, então a
+   recategorização não é oferecida ali.
+
+**Fora desta emenda:** remover a categoria de uma linha (voltar a "Sem categoria"); acrescentar palavra a
+uma categoria **sem** trocar a linha (isso é Categorias e a revisão da importação); recategorização em
+massa (§2.2); e todos os demais campos do lançamento (E2b).
+
+**Segurança.** Nenhum vetor novo: o vetor do ADR-029(i) — mover dinheiro entre naturezas para "sumir" com
+uma despesa — apenas ganha um caminho de UI a mais, com a **mesma mitigação já em vigor**: o lançamento
+continua visível em Tudo e em Investimentos, a faixa "Fora destes números" continua declarando o que o
+recorte não mostra, e o servidor continua auditando `transaction.updated`. O `categoryId` enviado sai
+sempre de uma opção do `<select>` alimentado pela árvore da casa; o nome da categoria entra na tela como
+**texto React** (filho, atributo ou toast), nunca como HTML montado. As respostas do servidor não mudam:
+404 para linha ou categoria de outra casa, 422 para transferência, natureza incompatível, arquivada ou
+grupo com subcategorias.
+
+**Critérios de aceite:**
+
+(a) A linha categorizada tem um `<button>` com o nome da categoria, `data-atalho` e **sem** `data-lacuna`;
+a lacuna tem os dois; a perna de transferência não tem controle de categoria nenhum.
+(b) Em modo trocar o `<select>` abre na categoria atual, e o confirmar diz `Escolha outra categoria` com
+`aria-disabled` — clicá-lo foca o campo e **não emite nenhuma requisição**.
+(c) Trocar emite **um** `PATCH` com `{ categoryId }`, mostra `Categoria trocada de X para Y.` e devolve o
+foco ao controle da mesma linha, já com o nome novo; nenhuma outra linha é tocada.
+(d) Na saída com palavra, o 409 da palavra que já é da categoria anterior deixa tudo como estava (nada de
+(b), nada de (c)).
+(e) Categorizar uma **lacuna** continua levando o foco à próxima lacuna, **pulando** as linhas
+categorizadas vizinhas.
+(f) Sob `tipo=despesas`, `tipo=receitas` e `tipo=investimentos`, a linha que sai da lista é anunciada no
+toast com a frase da natureza e o foco vai ao vizinho da foto.
+(g) A gravação escreve em cache **só na lista de lançamento** — o critério é a IDENTIDADE da query, não a
+presença de `pages`. `['transactions']` é prefixo de quatro formas, e as outras três ficam intactas:
+`['transactions','dashboard',mês]` (painel), `['transactions','reports','by-category',…]` (relatório) e
+`['transactions','investments',mês]` (a visão de `/investimentos`, que **também** é `InfiniteData` com
+`pages[].items[]` e por isso passaria por qualquer guarda de forma). Corrigido em 18/09/2026, achado C1 da
+revisão de segurança: com a §19 a linha marcada como aporte virou editável e **está** naquele cache, então
+trocá-la por um `Transaction` apagava o `flow` — coluna "Movimento" em branco, linha de despesa listada
+numa tela de aportes e `monthly.contributionsCents` ainda contando o valor, e o lixo ficava até o `gcTime`
+(a invalidação é `refetchType: 'active'` e a tela está desmontada). Prova: com o painel **e** com
+`/investimentos` em cache, a gravação atualiza a lista, não encosta nos dois — sem erro, com o toast de
+sucesso.
+(h) Categoria atual arquivada: campo no placeholder e nota `A categoria {nome} está arquivada e não pode
+ser escolhida de novo.`; categoria atual que é grupo com subcategoria ativa: `O grupo {nome} tem
+subcategorias e não recebe lançamento. Escolha uma delas.` — as duas frases dizem o substantivo, e a nota
+está no `aria-describedby` do `<select>` (docs/DESIGN.md (h) §2, ratificado em 18/09/2026).
+(i) Playwright: depois do fluxo "só este" da §11, recategorizar `MERCADO X` de Alimentação para outra
+categoria, com a tela a 375 px.
+
+---
+
+## 20. Emenda de 18/09/2026 — semente de casa nova com palavras-chave de fábrica (ADR-033)
+
+Casa nova passa a nascer com **15 grupos, 41 subcategorias e 440 palavras-chave** já cadastradas. A
+lista e a estrutura estão na **spec 0003 §5**; a fonte da verdade é `DefaultGroups()` em
+`backend/internal/category/seed.go`. Esta seção registra o que a semente muda **para esta spec**.
+
+### 20.1 O que muda no comportamento já contratado aqui
+
+Nada de contrato — schema, rotas e códigos de erro ficam iguais. O que muda é **quem já ocupa o
+espaço** numa casa nova, e isso torna visíveis três regras que antes quase nunca disparavam:
+
+| Situação em casa nova | Antes | Depois |
+|---|---|---|
+| `PATCH /categories/{grupo}` com `keywords` não vazio | 200 | **400 VALIDATION em `fields.keywords`** nos 14 grupos com filhas (§12) |
+| `POST`/`PATCH /categories` com palavra da semente | 201/200 | **409 KEYWORD_TAKEN**, com `ownerId` = a folha da semente que já a tem |
+| `PATCH /transactions/{id}` com `categoryId` de grupo com filhas | — | **422** (§13) |
+| análise da importação e `POST /transactions/auto-categorize` | sem sugestão até a pessoa cadastrar | **sugestão de fábrica** |
+
+A consequência de teste é declarada: a suíte E2E, que roda sobre uma casa compartilhada,
+**quebra de propósito** nos pontos em que assumia grupos sem filhas e palavras livres.
+
+### 20.2 As oito regras da lista (R1–R8) são NORMATIVAS
+
+Estão escritas por extenso no ADR-033 (decisão d) e no doc-comment de `DefaultGroups()`. Em resumo:
+sem palavra que seja subconjunto consecutivo de outra no mesmo lado do dinheiro (R1); produto de
+investimento num lado só, com frase verbo+produto no outro (R2); nada que alcance o limiar contra o
+vocabulário de rotina dos extratos, marcas de banco e nomes de pessoa (R3); nenhum meio de pagamento
+nem marca de banco (R4); palavra com menos de 5 runas só quando o token do extrato é exatamente ela
+(R5); genérico ambíguo fora (R6); teto de **16** palavras por folha semeada, contra o teto de 20 do
+domínio, para o atalho "Reconhecer por «x»" da §11 nunca nascer recusado (R7); e forma redundante não
+ocupa vaga (R8).
+
+### 20.3 O teste de tokens perigosos é OBRIGATÓRIO em qualquer mudança da semente
+
+`TestNenhumaPalavraDaSementeCasaComOVocabularioDeRotina`, em
+`backend/internal/category/seed_test.go`, roda **581 tokens** de rotina — boilerplate dos parsers
+`nubank`/`inter`/`c6`, marcas de banco e adquirente, nomes e sobrenomes comuns, lugares e
+modificadores de razão social — contra os matchers dos **dois** lados do dinheiro, e falha se
+qualquer palavra da semente alcançar `textmatch.MinScore`.
+
+Ele existe porque a ameaça desta feature não é errar uma linha: é **categorizar todas as
+transferências da casa em silêncio** e o `auto-categorize` com `dryRun: false` gravar isso. A lista
+de tokens **não encolhe** para fazer uma palavra caber — quem reprova é a palavra, e o motivo fica
+escrito no teste. Exemplos medidos que já custaram uma palavra: `contador` 89 contra `conta`;
+`seguro` 90 contra `pagseguro`; `ração` 89 contra `operação`; `benefício` 86 contra `beneficiário`;
+`magazineluiza` 82 contra o primeiro nome `luiza`.
+
+**Empate e falso positivo se resolvem NA LISTA, nunca no motor** (ADR-026): `internal/textmatch` não
+muda por causa da semente. Os casos aceitos ficam fixados em `seed_corpus_test.go`, com a pontuação
+medida — ver o ADR-033 (decisão f).
+
+### 20.4 A lista é calibrada pelo texto do PARSER, e o eixo que importa é a razão social
+
+Emenda da revisão de segurança de 18/09/2026, normativa para qualquer mudança futura na semente.
+
+A pergunta ao escolher um token perigoso **não** é "o que o banco escreve", e sim **"o que chega ao
+classificador"** — que é a saída de `importer.Describe` = `sanitize.Description` + `textnorm`. A
+diferença muda a resposta:
+
+- `sanitize.Description` **corta** a descrição no primeiro segmento que contém documento, então numa
+  linha de Pix do Nubank o nome da instituição **nunca chega ao matcher**: aquela linha enorme do
+  Itaú vira `pix enviado - energia exemplo s.a.`. Marca de banco, naquele formato, é um alvo que não
+  existe;
+- a **razão social**, ao contrário, sobrevive inteira — no Inter ela vem no par `Histórico;Descrição`
+  (`Pagamento efetuado;ADMINISTRADORA DE IMOVEIS LTDA`) e no C6 no `Título`, sem documento na linha e
+  portanto sem onde cortar.
+
+Foi por isso que a primeira versão da lista, com 532 tokens, ainda deixou passar sete falsos
+positivos — **todos** em razão social. O pior era mensal: «móveis» tirava **96** contra o token
+`imoveis`, e o aluguel pago à administradora entrava em "Compras › Casa e decoração" todo mês, com a
+sugestão aplicada por padrão no `confirm` da importação (spec 0005 §7). A lista cresceu para **580**
+nesse eixo e seis palavras da semente cederam — a medição de cada uma está no corpus e no ADR-033(g).
+
+### 20.5 Os testes da semente usam IGUALDADE EXATA, não piso
+
+`len(tokensDeRotina) == 581` e `len(corpusDaSemente()) == 296` são **igualdades**, não
+`GreaterOrEqual`. A razão é o movimento que um piso com folga permite: acrescentar uma palavra
+perigosa à semente e **podar em silêncio** os três ou quatro tokens que ela quebraria, com o build
+verde. Com igualdade, **trocar** um token por outro continua sendo possível e vira um diff de duas
+linhas que o revisor vê; **remover** quebra o build.
+
+Pelo mesmo motivo, o bloco "O QUE FICOU DELIBERADAMENTE DE FORA" de `seed_test.go` é **inventário
+completo**, não amostra: token perigoso que você decidir não incluir entra ali com o número e o
+motivo. A maior exceção — `mercado`, que não entra porque «supermercado» sozinho já tira 88 contra
+ele, e tirar «supermercado» custaria a categoria mais usada do app — estava ausente por omissão até a
+revisão apontar.
+
+### 20.6 R9 (modificador de marca) — CHECKLIST de revisão, não invariante de build
+
+Proposta na reconferência de 18/09/2026 e **medida antes de ser adotada**: palavra-chave escrita
+**colada** cujo prefixo ou sufixo de ≥ 5 runas seja palavra de uso comum **vaza esse pedaço**, porque
+a regra 2 do motor alcança a palavra inteira a partir da fatia. Foi o que produziu o achado N1 —
+`prime` ⊂ «amazonprime» (84), `smart` ⊂ «smartfit» (89), `ultra` ⊂ «ultragaz» (89), `colar` ⊂
+«decolar» (91) — e é a mesma mecânica de `mercado` ⊂ «minimercado».
+
+**Ela NÃO virou trava**, e a razão está medida em `seed_r9_diagnostico_test.go`:
+
+1. a regra crua acusa **1.357 fatias**; **1.351** são truncamento que não é palavra ("upermercado",
+   "abeleireiro", "adiantament"). O discriminador de verdade é *"a fatia é palavra comum?"*, e essa
+   pergunta não se responde sem um dicionário de português no repositório — dependência nova, decisão
+   de arquitetura, não de teste;
+2. o filtro automático que parecia óbvio — *"a fatia vence para outra dona"* — é o **sinal errado**, e
+   é o achado mais útil do diagnóstico: ele reduz a lista a 9 casos mas **perderia os quatro achados
+   do N1**, porque `colar` vence para Viagens (dona de «decolar»), `ultra` vence para Água/luz/gás
+   (dona de «ultragaz») e `mercado` vence para Supermercado (dona de «minimercado»). O estrago do N1
+   não é a fatia sugerir a folha errada; é **uma descrição alheia que contém a fatia** cair ali.
+
+O que sobra de automação honesta é marcar a fatia que **já é palavra conhecida do projeto** (token da
+lista de rotina ou palavra-chave de outra folha). Com esse filtro sobram **6**, todas inofensivas hoje
+porque a dona legítima vence com folga — e as duas primeiras são justamente as exceções já
+documentadas:
+
+| fatia | dentro de | contra a palavra | hoje vence | folga |
+|---|---|---|---|---|
+| `mercado` | «supermercado» | 88 | Supermercado, 89 | exceção documentada |
+| `smart` | «smartphone» | 85 | Compras › Eletrônicos, 85 | exceção documentada |
+| `posto` | «imposto» | 91 | Combustível, 100 | 9 pontos |
+| `estacio` | «estacionamento» | 85 | Educação (via «estácio»), 100 | 15 pontos |
+| `bilhete` | «bilheteria» | 91 | Cinema, 91 | `BILHETE UNICO` resolve certo pela frase (100) |
+| `cross` | «crossfit» | 89 | Academia, 89 | `GOLDEN CROSS` resolve certo pela frase (100) |
+
+**Nenhuma delas tem conserto grátis** — tratar qualquer uma exige remover uma palavra útil sem
+substituta. Por isso R9 vale como **checklist de revisão** ao acrescentar marca colada à semente, e
+**não** como invariante: ela não reprova palavra nenhuma.
+
+**O que É travado, em uma linha:** `assert.Equal(t, 6, len(achados))`. Um checklist impresso tem um
+defeito fatal — ninguém é obrigado a olhar. Com a contagem travada, quem acrescentar amanhã uma marca
+colada cuja fatia seja palavra do projeto vê o build quebrar e é levado até a tabela acima. É a mesma
+forma do achado A3 (igualdade exata em vez de piso) aplicada a um inventário, e custa uma linha.
+
+⚠️ **A fronteira do instrumento, para ninguém ler "6" como inventário completo.** O discriminador
+`palavrasConhecidasDoProjeto` lê `tokensDeRotina` mais os tokens da semente — e um token que é
+**exceção aceita nunca pode estar em `tokensDeRotina`**, porque quebraria o teste principal, que é
+exatamente o motivo de ele ser exceção. Logo **`ultra` e `colar` jamais aparecerão no diagnóstico**:
+dois dos achados que motivaram a regra são invisíveis para o instrumento que a mede. E quando um
+aparece é por acidente: `smart` só é "conhecido" porque «smart fit» virou frase e escreveu o token na
+semente; `mercado`, porque «mercado livre» o contém — não por estar na lista de rotina, de onde ele
+está explicitamente excluído. **O inventário completo é o bloco "O QUE FICOU DELIBERADAMENTE DE FORA"
+de `seed_test.go`** (que o achado A2 tornou completo); o diagnóstico é só a fatia mecanizável dele.

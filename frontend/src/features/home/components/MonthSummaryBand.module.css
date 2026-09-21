@@ -1,0 +1,108 @@
+@layer components {
+  /* Trocar de mês não pisca: o quadro anterior fica na tela, apagado e marcado
+     como ocupado, enquanto o novo chega. */
+  .secao {
+    transition: opacity var(--motion-base) var(--ease);
+  }
+
+  .secao[aria-busy="true"] {
+    opacity: 0.6;
+  }
+
+  /* Quem diz DE QUE MÊS são os números — e é ele que separa a faixa da data de
+     hoje, que está no cabeçalho da tela. Public Sans e --text-13: é rótulo de
+     seção, não manchete. */
+  .tituloDaSecao {
+    padding: var(--space-4) var(--space-4) 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-13);
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+
+  /* Uma <dl> EMPILHADA, nunca três colunas: os três números são do mesmo
+     período, e empilhados alinham na mesma borda direita — que é o que permite
+     compará-los de relance. Três colunas dariam três bordas diferentes e a
+     silhueta de grid de cards que o design system proíbe. */
+  .lista {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2) var(--space-4) var(--space-4);
+  }
+
+  .linha {
+    display: flex;
+    /* `baseline`: no celular o rótulo longo quebra em duas linhas e o número
+       fica ancorado na PRIMEIRA. */
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-5);
+    padding-block: var(--space-3);
+    font-size: var(--text-15);
+  }
+
+  /* Filete de 1px entre as linhas — nunca um cartão por número, nunca sombra. */
+  .linha + .linha {
+    border-block-start: 1px solid var(--border);
+  }
+
+  .termo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+    color: var(--ink-muted);
+  }
+
+  .contagem {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A segunda linha do <dt>: a contagem e, quando há, a frase que explica o
+     sinal ou o link do estado sem cadastro. Quebra em duas linhas no celular
+     sem empurrar o número. */
+  .motivo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1);
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  .separador {
+    color: var(--border-strong);
+  }
+
+  .valor {
+    flex: none;
+  }
+
+  .semValor {
+    color: var(--ink-muted);
+  }
+
+  /* Sintaxe clássica, e não a de intervalo: o jsdom não parseia a de intervalo
+     e descarta a folha inteira (ver AppShell.module.css). */
+  @media (max-width: 40rem) {
+    .tituloDaSecao {
+      padding: var(--space-3) var(--space-3) 0;
+    }
+
+    .lista {
+      padding: var(--space-2) var(--space-3) var(--space-3);
+    }
+
+    .linha {
+      gap: var(--space-4);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .secao {
+      transition: none;
+    }
+  }
+}

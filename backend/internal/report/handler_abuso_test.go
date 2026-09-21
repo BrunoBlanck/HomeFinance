@@ -14,9 +14,9 @@ import (
 )
 
 // Casos de abuso que faltavam no handler: as formas hostis de `month` que
-// ainda não estavam na tabela, o parâmetro repetido (que em Go tem uma regra
-// definida, e ela precisa estar testada para não mudar sem ninguém ver) e os
-// parâmetros espúrios em branco.
+// ainda não estavam na tabela, o parâmetro repetido (HPP — desde o ADR-032
+// os três parâmetros são lidos por httpserver.SoleQueryValue, e chave
+// repetida é 400 sem consultar nada) e os parâmetros espúrios em branco.
 
 // `month` hostil: injeção, travessia de caminho e um valor de 10 kB. Todos
 // terminam na MESMA recusa de 400 em fields.month, byte a byte, sem eco do
@@ -60,50 +60,95 @@ func TestHandlerMesHostilEh400Identico(t *testing.T) {
 	}
 }
 
-// `?kind=expense&kind=income`: `url.Values.Get` devolve o PRIMEIRO valor, e é
-// isso que precisa estar contratado — não porque o primeiro seja melhor que o
-// último, mas porque a regra tem de ser uma só e visível. Repetido 25 vezes
-// para provar que não depende de ordem de map.
-func TestHandlerKindRepetidoUsaSempreOPrimeiro(t *testing.T) {
+// Parâmetro REPETIDO é 400 no campo repetido, sem consultar nada (HPP,
+// ADR-032 — substitui a regra antiga de "o primeiro vence", que deixava proxy,
+// WAF e log lerem uma natureza enquanto o servidor respondia outra).
+//
+// Os três parâmetros, e as três formas da repetição: valores diferentes,
+// valores IGUAIS (a URL continua ambígua) e a segunda ocorrência VAZIA (a pior
+// das três — quem lê a última recebe "sem recorte" e a tela mostra tudo sob o
+// rótulo do recorte). A redação é própria do campo e não ecoa nenhum valor.
+func TestHandlerParametroRepetidoEh400(t *testing.T) {
 	t.Parallel()
 
-	casos := []struct {
+	casos := map[string]struct {
 		alvo     string
-		esperado string
+		campo    string
+		mensagem string
 	}{
-		{"/api/v1/reports/by-category?month=2026-09&kind=expense&kind=income", "expense"},
-		{"/api/v1/reports/by-category?month=2026-09&kind=income&kind=expense", "income"},
+		"month diferentes":        {"/api/v1/reports/by-category?month=2026-13&month=2026-09", "month", "Informe o mês uma única vez."},
+		"month iguais":            {"/api/v1/reports/by-category?month=2026-09&month=2026-09", "month", "Informe o mês uma única vez."},
+		"month segunda vazia":     {"/api/v1/reports/by-category?month=2026-09&month=", "month", "Informe o mês uma única vez."},
+		"kind diferentes":         {"/api/v1/reports/by-category?month=2026-09&kind=expense&kind=income", "kind", "Informe a natureza uma única vez."},
+		"kind iguais":             {"/api/v1/reports/by-category?month=2026-09&kind=income&kind=income", "kind", "Informe a natureza uma única vez."},
+		"kind segunda vazia":      {"/api/v1/reports/by-category?month=2026-09&kind=income&kind=", "kind", "Informe a natureza uma única vez."},
+		"kind válido depois lixo": {"/api/v1/reports/by-category?month=2026-09&kind=income&kind=%27%3B+DROP+TABLE+transactions%3B--", "kind", "Informe a natureza uma única vez."},
+		"kind inválido e válido":  {"/api/v1/reports/by-category?month=2026-09&kind=transfer_out&kind=expense", "kind", "Informe a natureza uma única vez."},
+		"accountGroup diferentes": {"/api/v1/reports/by-category?month=2026-09&accountGroup=credit&accountGroup=debit", "accountGroup", "Informe o grupo de contas uma única vez."},
+		"accountGroup iguais":     {"/api/v1/reports/by-category?month=2026-09&accountGroup=credit&accountGroup=credit", "accountGroup", "Informe o grupo de contas uma única vez."},
+		"accountGroup 2ª vazia":   {"/api/v1/reports/by-category?month=2026-09&accountGroup=credit&accountGroup=", "accountGroup", "Informe o grupo de contas uma única vez."},
+		"accountGroup 1ª vazia":   {"/api/v1/reports/by-category?month=2026-09&accountGroup=&accountGroup=credit", "accountGroup", "Informe o grupo de contas uma única vez."},
 	}
-	for _, c := range casos {
-		t.Run(c.esperado, func(t *testing.T) {
-			for range 25 {
-				a := novoHTTPAmbiente(t)
-				rec := a.chamar(t, minhaCasa, c.alvo)
-				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-				var v report.CategoryReportView
-				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &v))
-				require.Equal(t, c.esperado, v.Kind)
-				require.Len(t, a.ledger.chamadas, 1)
-				require.Equal(t, c.esperado, a.ledger.chamadas[0].kind)
+	for nome, c := range casos {
+		t.Run(nome, func(t *testing.T) {
+			t.Parallel()
+			a := novoHTTPAmbiente(t)
+			rec := a.chamar(t, minhaCasa, c.alvo)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			codigo, campos := corpoDeErro(t, rec)
+			assert.Equal(t, httpserver.CodeValidationFailed, codigo)
+			require.Len(t, campos, 1, "um campo por recusa: %v", campos)
+			assert.Equal(t, c.mensagem, campos[c.campo])
+			assert.Empty(t, a.ledger.chamadas, "chave repetida não chega ao banco")
+			assert.Empty(t, a.cats.chamadas)
+			assert.Empty(t, a.contas.chamadas)
+			for _, eco := range []string{"DROP", "transfer_out", "2026-13", "credit", "debit"} {
+				assert.NotContains(t, rec.Body.String(), eco, "a recusa não ecoa o valor enviado")
 			}
 		})
 	}
 
-	// O primeiro valor continua valendo mesmo quando o segundo é lixo — e o
-	// lixo não vira erro, porque nem é lido.
-	a := novoHTTPAmbiente(t)
-	rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09&kind=income&kind=%27%3B+DROP+TABLE+transactions%3B--")
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Len(t, a.ledger.chamadas, 1)
-	assert.Equal(t, "income", a.ledger.chamadas[0].kind)
+	// Uma falha por resposta, na ordem month → kind → accountGroup: com os
+	// três repetidos, só `month` aparece.
+	t.Run("três repetidos: só o primeiro", func(t *testing.T) {
+		t.Parallel()
+		a := novoHTTPAmbiente(t)
+		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09&month=2026-09&kind=income&kind=income&accountGroup=credit&accountGroup=credit")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		_, campos := corpoDeErro(t, rec)
+		assert.Equal(t, map[string]string{"month": "Informe o mês uma única vez."}, campos)
+		assert.Empty(t, a.ledger.chamadas)
+	})
 
-	// E o inverso: kind inválido PRIMEIRO é 400, mesmo com um válido depois.
-	a = novoHTTPAmbiente(t)
-	rec = a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09&kind=transfer_out&kind=expense")
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	_, campos := corpoDeErro(t, rec)
-	assert.Contains(t, campos, "kind")
-	assert.Empty(t, a.ledger.chamadas)
+	// Repetição vem ANTES da forma: `kind` repetido com `month` inválido é
+	// recusado pelo `month` (a leitura é na ordem, e o `month` vem primeiro),
+	// mas `accountGroup` repetido com `kind` inválido é recusado pelo
+	// `accountGroup` repetido — a URL ambígua nem chega ao serviço.
+	t.Run("repetição precede a validação de conteúdo", func(t *testing.T) {
+		t.Parallel()
+		a := novoHTTPAmbiente(t)
+		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09&kind=bogus&accountGroup=credit&accountGroup=debit")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		_, campos := corpoDeErro(t, rec)
+		assert.Equal(t, map[string]string{"accountGroup": "Informe o grupo de contas uma única vez."}, campos)
+		assert.Empty(t, a.ledger.chamadas)
+	})
+
+	// UMA ocorrência de cada continua sendo o caminho normal — e uma
+	// ocorrência VAZIA de `accountGroup` não é ambígua: é "todas as contas".
+	t.Run("uma ocorrência de cada é 200", func(t *testing.T) {
+		t.Parallel()
+		a := novoHTTPAmbiente(t)
+		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09&kind=income&accountGroup=")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var v report.CategoryReportView
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &v))
+		assert.Equal(t, "income", v.Kind)
+		assert.Nil(t, v.AccountGroup)
+		require.Len(t, a.ledger.chamadas, 1)
+		assert.Equal(t, "income", a.ledger.chamadas[0].kind)
+	})
 }
 
 // Parâmetros espúrios EM BRANCO (`householdId=`, `categoryId=`, `limit=`,

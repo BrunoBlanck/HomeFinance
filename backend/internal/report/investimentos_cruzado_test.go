@@ -92,7 +92,7 @@ func novaPilhaCruzada(t *testing.T) *pilhaCruzada {
 			classify.NewLoader(repoCategoria, repoConta),
 			transaction.WithClock(func() time.Time { return momento }),
 		),
-		relatorios: report.NewService(repoTx, repoCategoria, logging.Discard()),
+		relatorios: report.NewService(repoTx, repoCategoria, repoConta, logging.Discard()),
 		// A QUINTA resposta sobre a MESMA linha: GET /investments. Ela entra
 		// aqui, e não num teste com dublê, porque o critério 18 pede que ela
 		// concorde com as outras quatro — e concordância entre dublês é o que

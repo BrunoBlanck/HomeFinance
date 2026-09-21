@@ -92,6 +92,7 @@ export const TIPOS_DE_CONTA: readonly AccountKind[] = [
  *  aparecendo para o usuário. */
 export const ROTULO_DA_INSTITUICAO: Record<Institution, string> = {
   c6: 'C6',
+  inter: 'Inter',
   nubank: 'Nubank',
   other: 'Outras',
 }

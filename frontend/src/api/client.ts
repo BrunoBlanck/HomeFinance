@@ -55,6 +55,37 @@ export class NetworkError extends Error {
   }
 }
 
+/** A resposta chegou 200, mas o **eco** dos parâmetros não é o do pedido: o
+ *  servidor devolveu um recorte diferente daquele que a tela pediu (e que o
+ *  rótulo da tela já está afirmando).
+ *
+ *  **Quando se confere o eco — só quando as TRÊS valem:**
+ *
+ *  1. a resposta **ecoa** o parâmetro (ele é `required` no schema da resposta,
+ *     não apenas aceito na query);
+ *  2. o **rótulo visível** da tela afirma aquele recorte (`<h1>`, subtítulo,
+ *     `caption` da tabela);
+ *  3. o número exibido **muda de significado** se o recorte for outro.
+ *
+ *  Onde as três valem, divergência é **erro da query** — nunca um estado de
+ *  interface novo, nunca um aviso ao lado do número. O caminho de erro que a
+ *  tela já tem substitui o quadro inteiro, e nenhum número sobrevive sob um
+ *  rótulo que não é dele: é exatamente o defeito que o ADR-030 nomeia —
+ *  tecnicamente verdadeiro, visualmente mentiroso. Onde alguma das três falha,
+ *  **não se confere**: conferência sem rótulo a proteger é código morto.
+ *
+ *  Não carrega mensagem própria: `messageForError` o trata como erro
+ *  desconhecido e cai na frase genérica ("Algo falhou do nosso lado. Tente de
+ *  novo em instantes."), que é a verdade aqui — não há dado que o usuário possa
+ *  corrigir, e inventar copy nova seria uma segunda superfície de erro para a
+ *  mesma classe de problema. */
+export class EchoMismatchError extends Error {
+  constructor() {
+    super('A resposta da API não ecoou os parâmetros do pedido')
+    this.name = 'EchoMismatchError'
+  }
+}
+
 export type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   /** Objeto qualquer vira JSON. `FormData` vai como está — é assim que o envio

@@ -42,8 +42,23 @@ func TestInvestmentDetectTemBaldeProprioDe60PorHora(t *testing.T) {
 	assert.Equal(t, 3, rl.InvestmentDetect.Burst)
 	assert.Less(t, rl.InvestmentDetect.Burst, rl.InvestmentDetect.Requests,
 		"rota cara não pode gastar a cota inteira de uma vez")
-	assert.Equal(t, rl.TransferDetect.Burst, rl.InvestmentDetect.Burst,
-		"as rotas de escrita em massa têm o MESMO estouro — divergir é decisão, não descuido")
+
+	// Até 21/09/2026 as três irmãs tinham o MESMO estouro, e este teste
+	// travava a igualdade com a frase "divergir é decisão, não descuido".
+	// Pois divergiram, e por decisão: `/transfers/detect` e
+	// `/transactions/auto-categorize` subiram para 6 porque o "Reprocessar" do
+	// menu IA (spec 0010) encadeia as duas mês a mês numa janela de até 3
+	// meses — 3 chamadas na prévia e 3 na execução, em cada balde.
+	// `POST /investments/detect` NÃO participa dessa orquestração: continua
+	// sendo prévia + confirmação de UM mês, que cabe em 3.
+	//
+	// A asserção mudou de "igual" para "menor ou igual", que é o que a decisão
+	// autoriza: esta rota nunca pode ter estouro MAIOR que as irmãs, porque o
+	// risco de pool é o mesmo e o uso legítimo é menor.
+	assert.LessOrEqual(t, rl.InvestmentDetect.Burst, rl.TransferDetect.Burst,
+		"o estouro desta rota não pode passar o das irmãs: mesmo risco de pool, uso legítimo menor")
+	assert.Equal(t, 6, rl.TransferDetect.Burst,
+		"as duas rotas do Reprocessar (spec 0010, achado A1) estão em 6; mudar isso exige revisão de segurança")
 }
 
 // O perfil frouxo mantém a FORMA da regra: mesma janela, teto nunca menor, e o

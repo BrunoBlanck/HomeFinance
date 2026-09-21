@@ -34,8 +34,8 @@ const (
 )
 
 // Instituições. Conjunto FECHADO, exatamente o enum `Institution` do contrato
-// (c6 · nubank · other) — texto livre aqui viraria uma trava de importação que
-// nunca dispara.
+// (c6 · inter · nubank · other) — texto livre aqui viraria uma trava de
+// importação que nunca dispara.
 //
 // A instituição NÃO escolhe o parser da importação: quem escolhe é a detecção
 // por cabeçalho (ADR-024a). Ela é TRAVA DE CONSISTÊNCIA — arquivo detectado
@@ -45,12 +45,13 @@ const (
 //
 // O vocabulário é duplicado de propósito em relação a importer.Institution:
 // aquele pacote importa este, então a dependência inversa seria um ciclo. São
-// três strings estáveis e um teste que confere as duas listas lado a lado.
+// quatro strings estáveis e um teste que confere as duas listas lado a lado.
 const (
 	// InstitutionOther é o default da coluna institution (schema v3): conta
 	// que não veio de nenhuma instituição conhecida pela importação.
 	InstitutionOther  = "other"
 	InstitutionC6     = "c6"
+	InstitutionInter  = "inter"
 	InstitutionNubank = "nubank"
 )
 
@@ -272,7 +273,7 @@ func Kinds() []string {
 // ValidInstitution informa se a instituição pertence à allowlist.
 func ValidInstitution(institution string) bool {
 	switch institution {
-	case InstitutionC6, InstitutionNubank, InstitutionOther:
+	case InstitutionC6, InstitutionInter, InstitutionNubank, InstitutionOther:
 		return true
 	default:
 		return false
@@ -281,7 +282,7 @@ func ValidInstitution(institution string) bool {
 
 // Institutions devolve a allowlist, na ordem de exibição.
 func Institutions() []string {
-	return []string{InstitutionC6, InstitutionNubank, InstitutionOther}
+	return []string{InstitutionC6, InstitutionInter, InstitutionNubank, InstitutionOther}
 }
 
 // NormalizeInstitution valida a instituição e devolve o valor a gravar.

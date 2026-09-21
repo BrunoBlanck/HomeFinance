@@ -88,6 +88,44 @@ describe('Select', () => {
     ).toEqual(['c1', 'c2', 'c3'])
   })
 
+  /** O `aria-describedby` recebido é **somado** ao slot de mensagem, nunca o
+   *  substitui — há descrição que não cabe dentro do `FieldShell` (a nota do
+   *  editor de categoria de `/lancamentos`, docs/DESIGN.md (h) §2). */
+  it('soma o aria-describedby recebido ao slot de mensagem, sem perder o erro', () => {
+    render(
+      <>
+        <Select
+          label="Categoria"
+          options={OPCOES}
+          error="Escolha outra categoria."
+          aria-describedby="nota-de-fora"
+        />
+        <p id="nota-de-fora">A categoria Feira está arquivada.</p>
+      </>,
+    )
+
+    const campo = screen.getByLabelText('Categoria')
+    const ids = campo.getAttribute('aria-describedby')?.split(' ') ?? []
+    // Os dois, e nessa ordem: a mensagem do campo primeiro, o texto de fora
+    // depois.
+    expect(ids).toHaveLength(2)
+    expect(ids[0]).toMatch(/-message$/)
+    expect(ids[1]).toBe('nota-de-fora')
+    expect(campo).toHaveAccessibleDescription(
+      'Escolha outra categoria. A categoria Feira está arquivada.',
+    )
+  })
+
+  /** Retrocompatibilidade: `Select` é componente base de oito telas. Sem
+   *  `aria-describedby` recebido, o atributo é exatamente o de antes. */
+  it('sem aria-describedby recebido, o atributo continua sendo só o do slot de mensagem', () => {
+    const { container } = render(<Select label="Conta" options={OPCOES} />)
+
+    const campo = screen.getByLabelText('Conta')
+    const mensagem = container.querySelector('p[id$="-message"]')
+    expect(campo.getAttribute('aria-describedby')).toBe(mensagem?.id)
+  })
+
   it('descreve o erro por texto, não só por cor', () => {
     render(<Select label="Conta de destino" options={OPCOES} error="Escolha a conta de destino." />)
 

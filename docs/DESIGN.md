@@ -114,7 +114,7 @@ Tema por `data-theme="light|dark"` no `<html>`, com `@media (prefers-color-schem
 
 ## Referência de tom por tela
 
-- **Dashboard do mês:** o "resumo do caderno" — saldo do mês, entradas vs saídas, próximos vencimentos, orçamentos estourando. Tabela e números, não mar de cards.
+- **Dashboard do mês (painel, `/`):** o "resumo do caderno" — saldo do mês, entradas vs saídas, próximos vencimentos, orçamentos estourando. Tabela e números, não mar de cards. Investimento aqui é **um** número: o líquido do mês (aportes − resgates), com sinal e podendo ser negativo — ao contrário de `/investimentos`, que não publica derivado nenhum (18/09/2026, `LICOES-FRONTEND.md`).
 - **Lançamentos:** tabela densa, filtros discretos, adição rápida (a ação mais frequente do app deve custar o mínimo de cliques).
 - **Contas recorrentes:** linha do tempo de vencimentos do mês com estado pago/pendente/atrasado.
 - **Relatórios:** gráficos seguindo a skill `dataviz`, com a paleta deste documento.
@@ -569,6 +569,13 @@ categoria, as fichas de aprender de (d) e **um único** botão de confirmar cujo
 acontecer. Duas saídas: só este lançamento; ou este + palavra-chave na categoria + reprocessar os
 sem categoria do mês.
 
+**Emenda §19 da spec 0005 (18/09/2026) — trocar a categoria de uma linha já categorizada.** O
+pedido: "a qualquer momento eu manualmente alterar um lançamento de categoria". A célula de uma
+linha categorizada é o **mesmo controle** no **outro estado fechado** (§1-bis): o nome da categoria
+com o chevron, que abre o **mesmo editor** em modo *trocar* (§2, §3), com o `<select>` já na
+categoria atual. Um componente, dois estados fechados, um aberto — e o backend já substitui
+(`PATCH /transactions/{id}` com `categoryId` troca, não só preenche).
+
 **Decisão de forma: a linha se expande. Não é popover, não é diálogo.** Três razões, nesta ordem:
 
 1. A §11.1 pede "na própria linha". Uma camada flutuante sobre a tabela não é a linha.
@@ -606,7 +613,14 @@ preencher, não uma ação a disparar.
   o texto visível está contido no nome (WCAG 2.5.3) e o nome diz de qual linha é: dezoito botões
   "Sem categoria" iguais não dizem nada a quem navega por lista de controles.
 - Onde **não** aparece: linha de transferência (`Badge` `Transferência`, como hoje) e linha já
-  categorizada (o nome em texto — recategorizar é E2b).
+  categorizada — que, desde a emenda §19, tem o **outro estado fechado do mesmo controle** (§1-bis),
+  não a lacuna. O tracejado é **exclusivo da pendência**: é o sinal de "dinheiro esperando decisão",
+  e uma linha resolvida não o usa. Sob `?semCategoria=1` toda linha é lacuna; sob
+  `?tipo=investimentos` nenhuma é (aporte e resgate são definidos pela categoria).
+- Atributos de dados, nos **dois** estados: `data-atalho={id}` (é por ele que o foco **volta à
+  linha**, em qualquer estado) e `data-instancia="coluna" | "secundaria"` (para o CSS de alinhamento
+  do §1-bis). **Só na lacuna**: `data-lacuna` — é por ele que "a próxima lacuna" do §4 é procurada
+  (`button[data-lacuna]`), nunca por `data-atalho`, que agora também está nas categorizadas.
 - **Celular (< 40rem)**: a coluna Categoria some (`hideBelow: 'sm'`) e a `.secundaria` da descrição
   passa de `Nubank · Sem categoria` para `Nubank ·` + **o mesmo botão** (a `.secundaria` vira
   `display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1)`). São duas instâncias
@@ -614,6 +628,184 @@ preencher, não uma ação a disparar.
   duplica o nome da conta. Ids distintos (`atalho-categoria-{id}-coluna` / `-secundaria`) e
   `data-atalho={id}` nas duas; quem devolve o foco procura `[data-atalho="{id}"]` e escolhe a
   instância com `checkVisibility()`.
+
+#### 1-bis. A linha categorizada — o outro estado fechado (emenda §19 da spec 0005, 18/09/2026)
+
+A resposta ao pedido "alterar a categoria a qualquer momento" não é um segundo controle: é o
+**mesmo** controle da célula, com **dois estados fechados e um aberto**. Fechado, a lacuna e a
+linha categorizada diferem — uma é pendência, a outra é dado. Aberto, são idênticos: a pessoa está
+editando a categoria da linha, e isso é uma coisa só. Regra curta: **fechado difere, aberto é o
+mesmo.**
+
+**Fechado, categorizada** (`.categorizada`): o nome da categoria com o chevron. A tinta é a do
+`<span>` que estava ali — a densidade visual da tabela não muda, e a coluna continua sendo lida como
+coluna de dados, não como coluna de botões.
+
+- `<button type="button">` com texto visível **`{categoryName}`** e `ChevronDownIcon size={14}` à
+  direita, no mesmo `.chevron` da lacuna (`gap: var(--space-1)`). O chevron é a linguagem que a
+  lacuna e o `Select` já usam para "abre aqui", e funciona no toque.
+- Forma: a **mesma caixa** da lacuna (`display: inline-flex; align-items: center; min-block-size:
+  var(--control-h-sm); padding-inline: var(--space-2); border-radius: var(--radius-sm); background:
+  transparent; white-space: nowrap`) com **`border: 1px solid transparent`** — a borda existe e não
+  se vê; reserva a caixa para nada pular ao abrir. `font: inherit; color: inherit` (a `reset.css` já
+  faz isso para `<button>`, mas fica declarado): na célula herda `--text-15` e `--ink` do `.table`,
+  exatamente o que o `<span>` tinha; na `.secundaria` herda `--text-13` e `--ink-muted`, exatamente
+  o que o texto tinha. Peso 400 nos dois: é dado. Pintar o nome de `--ink` na secundária, onde a
+  linha inteira é `--ink-muted`, faria o nome saltar do `Nubank ·` ao lado e usaria tom como
+  affordance — esse trabalho é do chevron.
+- **Chevron** `color: var(--ink-muted)` em repouso, **sempre visível** — é o único portador da
+  affordance e precisa existir onde não há hover. Contraste sobre `--surface`: ≈ 5,6:1 no claro,
+  ≈ 6,1:1 no escuro; sobre o fantasma do hover, ≈ 5,0:1 — folga sobre o 3:1 de elemento de UI. Em
+  hover e aberto, `color: inherit` (acompanha o texto, que vai a `--ink`).
+- Hover (`@media (hover: hover)`): `color: var(--ink)` e fundo `color-mix(in oklch, var(--accent),
+  transparent 88%)` — os mesmos da lacuna. Foco: `outline: var(--focus-ring); outline-offset:
+  var(--focus-offset)`, e só isso (o anel é o sinal; o chevron não muda no foco). **O fundo diz
+  "pode"; a borda diz "está aberto"** — hover não acende borda.
+- **Aberto** (`[aria-expanded="true"]`): **idêntico à lacuna aberta** — `border-style: solid;
+  border-color: var(--border-strong); color: var(--ink)`, fundo fantasma, chevron em `rotate:
+  180deg` com a mesma transição. No CSS isso é literal: a caixa e o aberto moram numa classe base
+  `.atalho`, e `.lacuna` / `.categorizada` só dizem o que difere fechado. A única diferença que
+  sobra no aberto é o corpo do texto (13 px "Sem categoria" × 15 px "Alimentação"), e ela é a mesma
+  diferença entre placeholder e valor num `<select>`.
+- **Alinhamento na coluna**: o `padding-inline` mais a borda deslocariam o nome 9 px para a direita
+  do cabeçalho `Categoria` e do texto das outras colunas — a única coluna com conteúdo recuado do
+  cabeçalho, inaceitável numa tabela deste produto. Regra: **caixa visível alinha a caixa; caixa
+  invisível alinha o texto.** A `Badge Transferência` e a lacuna têm caixa visível → a caixa encosta
+  em `--cell-pad` e o texto fica a 9 px, como hoje. A categorizada tem caixa invisível → recua a
+  caixa: `.categorizada[data-instancia="coluna"] { margin-inline-start: calc(-1 * (var(--space-2)
+  + 1px)) }`. O nome fica onde o `<span>` estava; a caixa (fantasma no hover, sólida aberta) começa
+  7 px depois da borda da célula. Nada muda no `DataTable`. **Sem** margem negativa na
+  `.secundaria`: ali não há cabeçalho para alinhar, e o nome fica a 9 px do `·`, à mesma distância
+  do `Sem categoria` da lacuna — as linhas do celular ficam iguais entre si.
+- **Celular (< 40rem)**: o mecanismo do §1 — a instância `secundaria` (`Nubank ·` +
+  `[Alimentação ⌄]`), com `white-space: normal; text-align: start` **só nela**: um nome de até 60
+  caracteres quebra dentro do botão em vez de estourar a moldura. Custo medido e aceito: a
+  `.secundaria` de toda linha categorizada passa a ter 36 px (`--control-h-sm`) em vez de ≈ 20 px —
+  ≈ +16 px por linha, a altura que a linha pendente **já tinha**. Em troca as linhas do celular
+  ficam uniformes e o alvo de toque é o piso do projeto, sem truque de área invisível.
+- ARIA: `aria-label="{categoryName}. Trocar categoria de {rotuloDaLinha}"` (o texto visível está
+  contido no nome — WCAG 2.5.3 — e o nome diz de qual linha é); `aria-expanded`; `aria-controls`
+  **só aberto**, como na lacuna. Sem `title`.
+- Componente: o botão da célula passa a decidir o estado por `linha.categoryId === null` (lacuna)
+  ou não (categorizada) — um componente, duas classes (`styles.atalho` + `styles.lacuna` /
+  `styles.categorizada`); `podeCategorizar` passa a significar "tem controle de categoria", que é
+  "não é transferência".
+
+**O que foi rejeitado, e por quê**
+
+- *Chevron só em hover/foco + `text-decoration: underline dotted` em repouso.* Pontilhado é a
+  linguagem de `<abbr>` e de dica; no toque não há hover, então o pontilhado seria a única
+  affordance — e um traço interrompido em toda linha categorizada dilui o tracejado, que precisa
+  continuar sendo **só** pendência. Em `grayscale(1)`, "pontilhado embaixo" e "tracejado em volta"
+  viram a mesma família.
+- *Chevron com opacidade menor em repouso, plena no hover.* Para ficar ≥ 3:1 sobre `--surface` no
+  tema claro, `--ink-muted` não pode descer de **0,82** de opacidade — a diferença é imperceptível.
+  Não compra silêncio e cria uma terceira tinta.
+- *Sem chevron em repouso no desktop.* O pedido é "a qualquer momento"; um nome que só revela que é
+  botão no hover não é encontrável. A preocupação real — "dezoito setas em coluna" — se resolve pela
+  geometria: a coluna é `width: min` e o chevron acompanha o fim de cada nome; nomes de comprimentos
+  diferentes deixam as setas desalinhadas, um sufixo do nome, não uma coluna de setas. Se a tela
+  tiver dezoito linhas com o mesmo nome, é uma coluna de `Alimentação ⌄`, e isso é verdade.
+
+**CSS normativo** (`AtalhoDeCategoria.module.css`). A `.lacuna` de hoje é reorganizada em base +
+variante **sem mudar um pixel** do que ela renderiza:
+
+```css
+/* Base: a caixa e o aberto, comuns aos dois estados fechados. */
+.atalho {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: var(--control-h-sm);
+  padding-inline: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+
+  &:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+  }
+
+  /* Aberto: IDÊNTICO nos dois — borda sólida, tinta cheia, fantasma. */
+  &[aria-expanded="true"] {
+    border-style: solid;
+    border-color: var(--border-strong);
+    color: var(--ink);
+    background-color: color-mix(in oklch, var(--accent), transparent 88%);
+  }
+}
+
+/* Fechado, pendente — a lacuna de hoje. Tracejado é só dela. */
+.lacuna {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--ink-muted);
+  font: 400 var(--text-13) var(--font-ui);
+}
+
+/* Fechado, categorizada — o nome na tinta do lugar; só o chevron é muted. */
+.categorizada {
+  font: inherit;
+  color: inherit;
+
+  & .chevron {
+    color: var(--ink-muted);
+  }
+
+  &[aria-expanded="true"] .chevron {
+    color: inherit;
+  }
+
+  /* Caixa invisível alinha o TEXTO: na coluna, recua padding + borda para o
+     nome ficar na vertical do cabeçalho, onde o <span> estava. */
+  &[data-instancia="coluna"] {
+    margin-inline-start: calc(-1 * (var(--space-2) + 1px));
+  }
+
+  /* Na secundária o nome pode ter 60 caracteres: quebra dentro do botão. */
+  &[data-instancia="secundaria"] {
+    white-space: normal;
+    text-align: start;
+  }
+}
+
+/* .chevron: inalterado (caixa fixa de 14px, transição de rotate). */
+
+.atalho[aria-expanded="true"] .chevron {
+  rotate: 180deg;
+}
+
+@media (hover: hover) {
+  .atalho:hover {
+    color: var(--ink);
+    background-color: color-mix(in oklch, var(--accent), transparent 88%);
+  }
+
+  .categorizada:hover .chevron {
+    color: inherit;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atalho,
+  .chevron {
+    transition: none;
+  }
+}
+```
+
+Conferência em `filter: grayscale(1)`: lacuna = caixa tracejada + texto 13 px + chevron;
+categorizada = texto solto na tinta do lugar + chevron muted, sem caixa; transferência = `Badge`
+(coluna) ou texto sem chevron (secundária). Três formas, nenhuma depende de cor. Aberto = caixa
+sólida + fantasma + chevron virado, nos dois.
+
 #### 2. O editor — linha de detalhe
 
 `DataTable` ganha **uma** prop: `detail?: (row: T) => ReactNode | null`. Quando devolve conteúdo,
@@ -635,7 +827,8 @@ foco. Trocar mês, conta ou filtro fecha (o estado zera com a busca). **Clique f
 não é popover; a escolha pela metade fica até `Cancelar`, `Escape` ou o confirmar.
 
 **Anatomia** (dentro da `<td>`): `<fieldset class="editor">` com `<legend class="sr-only">
-Categorizar {rotuloDaLinha}</legend>`; `display: flex; flex-wrap: wrap; align-items: center;
+Categorizar {rotuloDaLinha}</legend>` (em modo trocar: `Trocar categoria de {rotuloDaLinha}`);
+`display: flex; flex-wrap: wrap; align-items: center;
 gap: var(--space-2) var(--space-4); min-inline-size: 0; border: 0; padding: 0; margin: 0`.
 Filhos, na ordem do DOM — que é a ordem do Tab:
 
@@ -646,8 +839,69 @@ Filhos, na ordem do DOM — que é a ordem do Tab:
    `<select>`, como em `.decisao`. **Recebe o foco ao abrir** (`useEffect` no `editandoId`).
    Placeholder `Escolha a categoria`, e não `Sem categoria`: aqui a opção vazia não é uma decisão,
    é "ainda falta" — o imperativo continua significando "falta escolher", como em `Escolha a conta`.
-2. **Fichas de aprender** — só com categoria escolhida (regra de (d)); `key={categoriaId}`, para
-   trocar a categoria soltar a ficha pressionada (a palavra pode já ser da outra). Mesma anatomia
+   **Modo trocar** (emenda §19): o `<select>` abre **já na categoria atual** (`value` inicial =
+   `linha.categoryId`) — a pessoa vê de onde está saindo antes de escolher para onde vai, e o
+   `Escape` não tem o que desfazer. Quando a atual **não está entre as opções**, o `<select>` abre
+   no placeholder e, abaixo dele, `<p class="nota">` (`--text-13`, `--ink-muted` — a mesma forma da
+   frase de categoria lotada; a classe `.lotada` passa a se chamar `.nota` e serve às duas) diz
+   **por quê** — sem ela o editor abriria vazio sem explicação, e a pessoa concluiria que a linha
+   perdeu a categoria. Enquanto as categorias carregam, a atual ainda não está nas opções: o
+   confirmar diz `Escolha uma categoria` e passa a `Escolha outra categoria` quando a lista chega —
+   não é defeito, é o estado real.
+
+   **Duas causas, duas frases** (ratificado em 18/09/2026, achado B5 do QA). A nota nunca troca uma
+   pela outra: mandar procurar em Arquivadas uma categoria que está lá, ativa, é pior do que não
+   dizer nada.
+
+   - **A atual foi arquivada** — marcação existente sobrevive ao arquivamento; atribuição nova,
+     não. O componente sabe porque `categoriaPorId(arvore, linha.categoryId)` **não acha** (a
+     árvore de `categoriasQueryOptions(false)` vem sem arquivadas):
+     `A categoria Alimentação está arquivada e não pode ser escolhida de novo.`
+   - **A atual é grupo com subcategoria ativa** — grupo com filha ativa não recebe lançamento
+     (spec 0005 §12/§13; o `<select>` só oferece folha e grupo sem filha). O componente sabe
+     porque **acha** e `children.length > 0`:
+     `O grupo Transporte tem subcategorias e não recebe lançamento. Escolha uma delas.`
+   - **As duas ao mesmo tempo** (grupo arquivado com filha ativa): vence a frase da arquivada — é a
+     única que a árvore consegue provar, e desarquivar sozinho não devolveria a opção. Limite
+     declarado, não defeito.
+
+   Três decisões dentro dessas frases:
+
+   - **O substantivo é explícito (`A categoria`, `O grupo`), nunca elíptico.** É a regra que (l) já
+     ratificou para o nome de natureza, agora dita por inteiro: **nome injetado em frase nunca
+     governa concordância**. Com o substantivo elíptico, o feminino de "arquivada" e "escolhida"
+     ficava preso a uma palavra invisível, e a semente de categorias de fábrica — 8 dos 15 grupos
+     com nome masculino (Transporte, Lazer, Serviços, Pessoal, Impostos, Salário, Investimentos,
+     Resgates) — produziria `Salário está arquivada e não pode ser escolhida de novo`. Com o
+     substantivo à vista a concordância é legítima em qualquer nome, inclusive nos que a casa
+     inventar; o artigo é do substantivo, não do nome.
+   - **`O grupo` na segunda frase, e não `A categoria`.** Quando essa nota aparece, aquilo é sempre
+     um grupo (`children.length > 0`), e `grupo`/`subcategoria` é o par de palavras que
+     `/categorias` já usa — o substantivo diz onde ir olhar. De quebra, substantivo diferente é o
+     que torna as duas frases impossíveis de confundir, a olho e em teste.
+   - **A segunda frase termina em instrução, e perde o `agora`.** Quem abre o editor está
+     procurando `Transporte` numa lista que não o tem: precisa de instrução, não de descrição — a
+     mesma decisão da frase da folha em (l). `Escolha uma delas` aponta para as opções que estão
+     ali, dentro do `<optgroup>` `Transporte`. E `agora tem subcategorias` afirmava uma mudança no
+     tempo que a semente desmente: 14 dos 15 grupos **nascem** com subcategorias, e a frase precisa
+     ser verdadeira nos dois mundos. Duas orações, como a frase da categoria lotada, que divide a
+     mesma classe `.nota`.
+
+   **A nota tem de estar no `aria-describedby` do `<select>` — hoje não está.** Verificado em
+   18/09/2026: `.nota` é um `<p>` irmão sem `id`, e `Select` remove `aria-describedby` das props
+   (`Omit<…, 'aria-describedby'>`). Quem chega ao campo pelo Tab ouve "Categoria de {rótulo}, caixa
+   de combinação, Escolha a categoria" e **nada** explica o vazio: a frase existe só para quem
+   enxerga. Correção, sem mexer um pixel no layout — dar `id` à `<p class="nota">` e fazer o
+   `Select` **somar** o `aria-describedby` recebido ao `mensagemId` que ele já monta
+   (`[mensagemId, recebido].filter(Boolean).join(' ')`), em vez de omiti-lo do tipo. Passar a nota
+   como `hint` do `Select` foi **rejeitado**: o `hint` mora dentro do `FieldShell`, que é item flex
+   do `.editor`, e 80 caracteres ali esticariam a coluna do campo e empurrariam as fichas para a
+   linha de baixo.
+2. **Fichas de aprender** — só com categoria escolhida (regra de (d)) e, em modo trocar, **só com
+   escolha diferente da atual**: com a atual selecionada não há troca, e "ensinar a categoria de hoje
+   a reconhecer esta descrição" é outra ação, que já tem casa em Categorias e na revisão da
+   importação — aqui viraria um terceiro modo com um `PATCH` que não muda nada. `key={categoriaId}`,
+   para trocar a categoria soltar a ficha pressionada (a palavra pode já ser da outra). Mesma anatomia
    de (d): `<div class="fichas">` `display: flex; flex-wrap: wrap; align-items: center; gap:
    var(--space-1)`; rótulo `Da próxima vez, reconhecer por` (`--text-13`, `--ink-muted`); fichas
    `Button variant="quiet" size="sm"` com texto = a palavra; lista por
@@ -693,6 +947,25 @@ do mês — o clique a mais é o preço certo para uma ação que não se desfaz
 | categoria escolhida, nenhuma ficha pressionada | `Categorizar` | **só este**: `PATCH /transactions/{id}` `{ categoryId }` |
 | categoria escolhida + «mercado» pressionada | `Categorizar e reconhecer por «mercado»` | (a) `PATCH /categories/{id}` com a lista lida do cache + a palavra → (b) `PATCH /transactions/{id}` → (c) `POST /transactions/auto-categorize` `{ month: mês da tela, dryRun: false }` |
 | em andamento | o rótulo que estava, com `loading` (spinner, `aria-busy`, foco preservado) | `<select>` e fichas ficam como estão, **sem `disabled`**; cliques são ignorados enquanto `loading` |
+
+**Modo trocar** (emenda §19): o mesmo botão, com o verbo da ação — **trocar**. O rótulo diz o que
+vai acontecer com **esta** linha, e a categoria atual é uma escolha que não faz nada:
+
+| Estado | Rótulo do confirmar | O que faz |
+|---|---|---|
+| sem escolha (placeholder — atual arquivada ou lista carregando) | `Escolha uma categoria` + `aria-disabled="true"` | clique move o foco ao `<select>` |
+| escolha **= atual** | `Escolha outra categoria` + `aria-disabled="true"` | clique move o foco ao `<select>`; **nenhuma requisição** sai — não existe "trocar para a mesma" |
+| escolha ≠ atual, nenhuma ficha | `Trocar categoria` | `PATCH /transactions/{id}` `{ categoryId }` — o servidor substitui |
+| escolha ≠ atual + «uber» pressionada | `Trocar e reconhecer por «uber»` | (a) → (b) → (c) como acima; (c) continua tocando **só** os sem categoria do mês (spec §4.3) — trocar uma linha nunca recategoriza outra que já tinha dona |
+| em andamento | como acima | como acima |
+
+Por que `Trocar categoria`, e não `Trocar para Lazer`: o destino está no `<select>`, a um palmo do
+botão, e repeti-lo alongaria o rótulo com palavra-chave (`Trocar para Lazer e reconhecer por
+«uber»`, 41ch) sem dizer nada novo. Largura a 375 px: `Trocar e reconhecer por «uber»` (30ch a
+13 px ≈ 240 px com padding) cabe ao lado de `Cancelar` (≈ 82 px) nos 343 px úteis; com «mercado»
+(33ch) o `Cancelar` desce — `.acoes` embrulha, como já acontece com `Categorizar e reconhecer por
+«mercado»`, que é 5ch mais longo que qualquer rótulo de trocar. Nunca "alterar", "mudar", "editar"
+ou "recategorizar": do botão ao toast, o verbo é trocar.
 
 **Teclado**: Enter/Space no botão da célula abre. `Escape` em qualquer ponto do editor (keydown no
 `<fieldset>`) fecha sem gravar e devolve o foco ao botão da célula (instância visível); `Cancelar`
@@ -741,6 +1014,55 @@ não interceptar.
   lado do dinheiro (E7 (l)): o `Select` oferece as duas, e ela só aparece quando as duas
   estão vazias.
 
+**Depois de trocar** (emenda §19). A diferença toda está no foco: quem troca uma categoria está
+trabalhando **nesta** linha, não varrendo pendências. Não existe "próxima lacuna" aqui.
+
+- **Só este, sucesso**: fecha; a célula mostra o nome novo no mesmo frame (o cache recebe o
+  `Transaction` do `PATCH`) e `transactions` é invalidada — o que mudou na faixa, o servidor diz.
+  Toast: `Categoria trocada de Transporte para Lazer.` (anterior não resolvível — `categoryName`
+  nulo com `categoryId` presente: `Categoria trocada para Lazer.`). **O foco volta ao botão da mesma
+  linha**, agora `.categorizada` com o nome novo — a instância visível, achada por
+  `[data-atalho="{id}"]`. Sem realce, sem animação na célula: a pessoa acabou de fazer isso e está
+  olhando; o toast confirma.
+- **Com palavra-chave, sucesso nas três chamadas**: (a) → (b) → (c) como no modo categorizar; (c)
+  continua tocando só os sem categoria do mês. Invalida `categories` depois de (a) e `transactions`
+  uma vez depois de (c); o foco volta ao botão da mesma linha depois do refetch. Toast: `Categoria
+  trocada de Transporte para Lazer · «uber» adicionada a Lazer · mais 3 lançamentos de setembro
+  categorizados.` — a troca desta linha vem **primeiro** porque é o que a pessoa fez e o que a
+  palavra não implica (no modo categorizar, `«mercado» adicionada a Alimentação` já implica esta
+  linha; aqui não). O terceiro segmento é `fraseDosOutros` de hoje (`· mais 1 lançamento de
+  setembro categorizado.` / `· nenhum outro lançamento de setembro categorizado.`).
+- **A linha sai da lista** (só sob `?tipo=`; sob `?semCategoria=1` não há linha categorizada): a
+  categoria nova contradiz o filtro — `despesas` → categoria de investimento, `receitas` → de
+  resgate e, caso novo, **`investimentos` → categoria de despesa ou de receita**. O toast ganha a
+  segunda frase de `fraseDaLinhaQueSaiu` (E2d (g)), com o sujeito `Ele` no só-este e `Este
+  lançamento` na saída com palavra; a tabela de movimentos ganha as duas linhas novas: `é uma
+  despesa, e a lista mostra só aportes e resgates.` / `é uma receita, e a lista mostra só aportes e
+  resgates.` — o **mesmo molde** das duas frases ratificadas, sem "agora": um molde só em
+  `fraseDaLinhaQueSaiu`, sem parâmetro de modo. O botão da linha não existe mais, então o foco vai ao
+  **vizinho da foto**: antes de gravar, o confirmar fotografa os controles de categoria visíveis
+  (`button[data-atalho]`, **qualquer** estado, na ordem da tabela); depois do refetch, o foco vai ao
+  controle da linha **seguinte** na foto que ainda exista; não havendo, o da **anterior**; não
+  havendo, `Carregar mais` se existir; senão o `<h1>`. Linha de transferência não está na foto (não
+  tem controle) e é pulada naturalmente.
+- **409 em (a)**, **falha em (b)**, **falha em (c)**, **422 da §13** e **outro erro**: como no modo
+  categorizar, com o rótulo voltando a `Trocar categoria` (e não `Categorizar`) e estes textos —
+  falha em (b): `«uber» adicionada a Lazer, mas o lançamento continua em Transporte. Tente de novo.`
+  (anterior não resolvível: `«uber» adicionada a Lazer, mas a categoria não foi trocada. Tente de
+  novo.`); falha em (c): `«uber» adicionada e categoria trocada para Lazer, mas os outros do mês não
+  foram categorizados — use Categorizar automaticamente na faixa.` No 422 a escolha é limpa para o
+  placeholder (não volta à atual): a mensagem junto do `<select>` pede outra, e é isso que o
+  placeholder diz.
+- **`Escape` e `Cancelar`**: fecham sem gravar e devolvem o foco ao botão da linha — o `<select>`
+  tinha a atual, e nada mudou. Idêntico ao modo categorizar.
+- **Mecânica do foco, para o dev**: `focarLacuna(id)` vira `focarAtalho(id)` e procura
+  `[data-atalho="{id}"]` (qualquer estado, instância visível); `lacunasVisiveis()`,
+  `idsDasLacunas()` e `proximaLacuna()` passam a consultar `button[data-lacuna]` — senão a linha
+  categorizada vizinha seria tratada como "próxima lacuna" no modo categorizar. A foto do modo trocar
+  é a de `button[data-atalho]`, e a busca do vizinho é seguinte → anterior → `Carregar mais` →
+  `<h1>`, sem o terceiro passo "qualquer que sobrou" do modo categorizar (pular para uma linha
+  aleatória não é devolver o foco).
+
 **Código compartilhado** (regra "sem imports entre features"): `palavrasParaAprender`,
 `MAX_FICHAS` e `citarPalavra` saem de `features/import/` para `lib/keywords.ts` — a revisão passa a
 importar de lá; `AutoCategorizeDialog`, que hoje escreve `«${…}»` à mão, passa a usar
@@ -768,10 +1090,26 @@ o componente (ou mover para `features/transactions/lexico.ts`).
 | Toast — falha em (c) | `«mercado» adicionada e lançamento categorizado, mas os outros do mês não foram — use Categorizar automaticamente na faixa.` |
 | Sem categorias do lado do dinheiro | `Nenhuma categoria de despesa ou de investimento ainda.` / `Nenhuma categoria de receita ou de resgate ainda.` — `Ir para categorias` |
 | Erro ao carregar categorias | `Não foi possível carregar as categorias.` — `Tentar de novo` |
+| Botão da célula, categorizada (visível) — emenda §19 | `{categoryName}` — ex. `Alimentação` |
+| Botão da célula, categorizada (`aria-label`) | `Alimentação. Trocar categoria de {descrição}, {data por extenso}, {valor}` |
+| Legenda do editor em modo trocar (`sr-only`) | `Trocar categoria de {descrição}, {data por extenso}, {valor}` |
+| Nota sob o `<select>` — a atual foi **arquivada** | `A categoria Alimentação está arquivada e não pode ser escolhida de novo.` |
+| Nota sob o `<select>` — a atual é **grupo com subcategoria ativa** | `O grupo Transporte tem subcategorias e não recebe lançamento. Escolha uma delas.` |
+| Confirmar — modo trocar | `Escolha uma categoria` (`aria-disabled`, placeholder) · `Escolha outra categoria` (`aria-disabled`, escolha = atual) · `Trocar categoria` · `Trocar e reconhecer por «uber»` |
+| Toast — trocar, só este | `Categoria trocada de Transporte para Lazer.` / anterior não resolvível: `Categoria trocada para Lazer.` |
+| Toast — trocar, com palavra | `Categoria trocada de Transporte para Lazer · «uber» adicionada a Lazer · mais 3 lançamentos de setembro categorizados.` / `· mais 1 lançamento de setembro categorizado.` / `· nenhum outro lançamento de setembro categorizado.` |
+| Toast — trocar, falha em (b) | `«uber» adicionada a Lazer, mas o lançamento continua em Transporte. Tente de novo.` / `«uber» adicionada a Lazer, mas a categoria não foi trocada. Tente de novo.` |
+| Toast — trocar, falha em (c) | `«uber» adicionada e categoria trocada para Lazer, mas os outros do mês não foram categorizados — use Categorizar automaticamente na faixa.` |
+| Frase de saída sob `investimentos` (2ª frase do toast, E2d (g)) | `Ele saiu da lista: é uma despesa, e a lista mostra só aportes e resgates.` / `Ele saiu da lista: é uma receita, e a lista mostra só aportes e resgates.` — com palavra, o sujeito é `Este lançamento` |
 
 Léxico: a palavra sempre entre aspas angulares; o mês por extenso e em minúsculas (`setembro`);
 o estado é a palavra `Sem categoria`, nunca cor; nenhum "sugerido", "inteligente" ou "automágico".
 A tabela (g) continua valendo para tudo o que este atalho reaproveita (409, rótulo das fichas).
+Em modo trocar o verbo é **trocar** (`Trocar categoria`, `Categoria trocada`) do botão ao toast —
+nunca "alterar", "mudar", "editar" ou "recategorizar" na interface; origem e destino sempre em
+palavras (`de Transporte para Lazer`), nunca só o destino. E **nome de categoria injetado em frase
+nunca governa concordância**: onde o texto pede gênero, o substantivo vem à vista (`A categoria
+Alimentação…`, `O grupo Transporte…`) — a mesma regra que (l) fixou para o nome de natureza.
 ### Checklist anti-cara-de-IA — E2c (aplicar com a tela pronta)
 
 1. `filter: grayscale(1)` na revisão e em `/transferencias`: toda decisão continua legível? Se
@@ -819,7 +1157,8 @@ Itens específicos do atalho de categorização em `/lancamentos` — (h):
 20. Nenhum `disabled`: confirmar com `aria-disabled` e rótulo `Escolha uma categoria`; `<select>`
     e fichas continuam focáveis durante o `loading`.
 21. Foco: abre no `<select>`; `Escape` e `Cancelar` devolvem ao botão da célula (a instância
-    visível); depois de gravar, vai para a próxima lacuna da tabela.
+    visível); depois de categorizar uma lacuna, vai para a próxima lacuna da tabela (em modo
+    trocar, ver 27).
 22. Os números do toast são os do servidor (`categorized` de (c)) — nunca a contagem das linhas
     carregadas na tela.
 23. Clique fora não fecha; só uma linha aberta por vez; trocar mês ou filtro fecha.
@@ -827,6 +1166,28 @@ Itens específicos do atalho de categorização em `/lancamentos` — (h):
     sem rolagem horizontal (conferir o `colSpan` com as colunas escondidas).
 25. `filter: grayscale(1)`: a lacuna (tracejado), a ficha pressionada (ícone) e a linha aberta
     (chevron virado + editor) continuam legíveis.
+
+Itens do modo trocar — (h) §1-bis e emenda §19 (18/09/2026):
+
+26. A linha categorizada **não é lacuna**: nome na tinta do lugar (`--ink` na coluna, `--ink-muted`
+    na secundária), `border: 1px solid transparent`, chevron `--ink-muted` sempre visível; o
+    tracejado continua só na pendência. Em `filter: grayscale(1)` os dois estados fechados se
+    distinguem por **forma** (caixa tracejada × texto solto com chevron), e o aberto é o mesmo nos
+    dois (borda sólida + chevron virado). Nenhum sublinhado pontilhado, nenhuma opacidade.
+27. Depois de trocar, o foco volta ao botão da **mesma** linha (instância visível, por
+    `[data-atalho]`); só quando a linha saiu da lista sob `?tipo=` ele vai ao vizinho da foto →
+    `Carregar mais` → `<h1>`. Nunca "próxima lacuna" no modo trocar — e a busca da próxima lacuna do
+    modo categorizar usa `[data-lacuna]`, não `[data-atalho]`.
+28. Confirmar com a categoria atual selecionada é `aria-disabled` com rótulo `Escolha outra
+    categoria`; o clique foca o `<select>` e **nenhuma requisição** sai. As fichas só existem com
+    escolha diferente da atual.
+29. O toast de trocar diz **de onde para onde em palavras** (`Categoria trocada de Transporte para
+    Lazer.`), nunca só o destino; com palavra-chave, a troca desta linha vem antes da palavra e do
+    número do mês. Sob `investimentos`, a linha que virou despesa ou receita ganha a frase de saída.
+30. Alinhamento na coluna: o nome da categoria continua na vertical do cabeçalho `Categoria` e do
+    texto das outras colunas (margem negativa de `--space-2` + 1 px só em
+    `data-instancia="coluna"`); a caixa da `Badge Transferência` e a da lacuna continuam encostadas
+    em `--cell-pad`. Na secundária, nome e `Sem categoria` ficam à mesma distância do `·`.
 
 ## E6a — relatório por categoria: `/relatorios/categorias` e a primeira rosca (ADR-027, 17/09/2026)
 
@@ -1121,9 +1482,14 @@ dinheiro em setembro.` O mês é o da casca (`?mes`), e a query do relatório fi
 `['transactions', …]` (ADR-027).
 
 **Faixa** (a `.faixa` de `/transferencias`, dentro de `Panel padding="none"`): à esquerda
-`Select density="compact" label="Natureza"` com `Despesas` / `Receitas` — **sem placeholder**
-(sempre há valor); `?natureza=despesas|receitas`, ausente = despesas, validado em `search.ts` e
-mapeado para `kind=expense|income` na API. À direita `.resumo` (o mesmo estilo de `.saldo`):
+`Select density="compact" label="Natureza"` com `Despesas` / `Despesas no crédito` /
+`Despesas no débito` / `Receitas` — **sem placeholder** (sempre há valor);
+`?natureza=despesas|despesas-credito|despesas-debito|receitas`, ausente = despesas, validado em
+`search.ts` por allowlist (`naturezaValida`) e traduzido pela tela — e só por ela — para o par
+`{kind: expense|income, accountGroup: credit|debit|ausente}` da API (ADR-032, 18/09/2026). Os dois
+recortes de conta são despesas: `Despesas` = crédito + débito. Trocar de opção é trocar de busca,
+não de rota — `keepPreviousData` mantém o quadro anterior a 0,6 com `aria-busy` e o foco fica no
+seletor. À direita `.resumo` (o mesmo estilo de `.saldo`):
 `<MoneyText format="currency" />` + ` em 87 lançamentos` (`em 1 lançamento`). Carregando:
 `Skeleton width="11rem" height="1rem"`. Vazio: sem resumo (o `EmptyState` já diz).
 
@@ -1221,17 +1587,17 @@ item nomeia a seção `Relatórios`, não este gráfico. Massa óptica de 4,75 a
 | Onde | Texto |
 |---|---|
 | Navegação | `Relatórios` |
-| `document.title` | `Gastos por categoria · HomeFinance` / `Receitas por categoria · HomeFinance` |
-| `<h1>` | `Gastos por categoria` / `Receitas por categoria` |
-| Apoio | `Para onde foi o dinheiro em setembro.` / `De onde veio o dinheiro em setembro.` |
-| Filtro | `Natureza` — opções `Despesas` · `Receitas` |
+| `document.title` | `Gastos por categoria · HomeFinance` / `Gastos no crédito por categoria · HomeFinance` / `Gastos no débito por categoria · HomeFinance` / `Receitas por categoria · HomeFinance` |
+| `<h1>` | `Gastos por categoria` / `Gastos no crédito por categoria` / `Gastos no débito por categoria` / `Receitas por categoria` |
+| Apoio | `Para onde foi o dinheiro em setembro.` / `Para onde foi o dinheiro do cartão de crédito em setembro.` / `Para onde foi o dinheiro que saiu direto das contas em setembro.` / `De onde veio o dinheiro em setembro.` |
+| Filtro | `Natureza` — opções `Despesas` · `Despesas no crédito` · `Despesas no débito` · `Receitas`, nesta ordem (ADR-032, 18/09/2026). Os dois recortes ficam ENTRE `Despesas` e `Receitas` porque **são** despesas; URL `?natureza=despesas-credito` / `?natureza=despesas-debito`, traduzida pela tela para `kind=expense` + `accountGroup=credit|debit` |
 | Resumo da faixa | `R$ 5.123,45 em 87 lançamentos` / `R$ 45,00 em 1 lançamento` |
 | Centro da rosca | `5.123,45` + `setembro` (`sr-only` em volta: `Total de … em setembro`) |
 | `<title>` da fatia | `Alimentação · R$ 2.100,00 · 41,2%` · `Sem categoria · R$ 300,00 · 5,9%` · `Outras (6 categorias) · R$ 630,00 · 12,3%` |
 | Fatia dobrada | `Outras (6 categorias)` / `Outra (1 categoria)` |
 | Legenda (`li`) | `Alimentação` `41,2%` |
 | `<figcaption>` | `Distribuição por categoria — os valores estão na tabela abaixo.` |
-| `caption` da tabela | `Gastos por categoria em setembro de 2026` / `Receitas por categoria em setembro de 2026` |
+| `caption` da tabela | `Gastos por categoria em setembro de 2026` / `Gastos no crédito por categoria em setembro de 2026` / `Gastos no débito por categoria em setembro de 2026` / `Receitas por categoria em setembro de 2026` |
 | Colunas | `Categoria` · `Lançamentos` · `Participação` · `Valor` |
 | Subcategoria (`sr-only`) | `em Alimentação: ` |
 | Linha direta | `Sem subcategoria` |
@@ -1240,7 +1606,7 @@ item nomeia a seção `Relatórios`, não este gráfico. Massa óptica de 4,75 a
 | Rodapé | `Total` · `87` · `100,00%` · `5.123,45` |
 | Secundária no celular | `12 lançamentos` / `1 lançamento` |
 | Participação | tabela `41,23%` · legenda e `<title>` `41,2%` |
-| Vazio | `Nenhuma despesa em setembro de 2026.` / `Nenhuma receita em setembro de 2026.` — `O relatório aparece assim que houver lançamentos no mês — registre um em Lançamentos ou importe o extrato.` — `Importar extrato` |
+| Vazio | `Nenhuma despesa em setembro de 2026.` / `Nenhuma despesa no crédito em setembro de 2026.` / `Nenhuma despesa no débito em setembro de 2026.` / `Nenhuma receita em setembro de 2026.` — descrição e botão iguais nas quatro: `O relatório aparece assim que houver lançamentos no mês — registre um em Lançamentos ou importe o extrato.` — `Importar extrato` |
 | Erro | `Não foi possível carregar o relatório.` — `Tentar de novo` |
 
 Léxico: mês por extenso em minúsculas (`setembro`); `Sem categoria` e `Sem subcategoria` são
@@ -1274,8 +1640,8 @@ palavras, nunca travessão; nada de "gráfico interativo", "insights" ou "visão
     `CategoryReportScreen.module.css`; os `--chart-*` vêm de `tokens.css`, não do módulo.
 15. Percentuais só **formatados** (`shareBp` do servidor); a única soma do cliente é a dobra
     inteira de Outras. Duas casas na tabela, uma na legenda.
-16. Copy da tabela (i), sem "poderoso", "inteligente", "visão 360°"; `Natureza` com duas opções
-    e sem placeholder.
+16. Copy da tabela (i), sem "poderoso", "inteligente", "visão 360°"; `Natureza` com as quatro
+    opções da tabela (duas naturezas + dois recortes de conta, ADR-032) e sem placeholder.
 17. Foco no `<h1>`; `Select` nativo; a 375 px a figura empilha, a coluna `Lançamentos`
     reaparece na `.secundaria`, e a página não rola na horizontal.
 
@@ -1638,6 +2004,7 @@ gap: var(--space-5)`, uma coluna abaixo de 40rem; cada coluna é um título
 - **Nada de derivado.** Sem líquido, sem saldo investido, sem variação contra o mês anterior, sem
   percentual, sem seta de tendência (spec 0006 §3.4.2). Quem quer saber "quanto eu tenho" está na
   tela errada, e a tela não finge o contrário.
+  ⚠️ Isso vale para **esta** tela. O **painel** (`/`) mostra, desde 18/09/2026, o investimento do mês como UM número **líquido** (aportes − resgates, com sinal, podendo ser negativo) — decisão do usuário registrada em `LICOES-FRONTEND.md`. As duas telas respondem a perguntas diferentes, e é essa diferença que autoriza números diferentes.
 - Janeiro selecionado faz as duas colunas mostrarem os mesmos números. É correto e fica assim —
   não é um caso a "consertar".
 
@@ -1966,9 +2333,19 @@ há valor, como o filtro de `/relatorios/categorias`). Só aparece em grupo — 
 `editar` de grupo —, nunca em folha, que herda (ADR-017b). `hint`: `As subcategorias deste grupo
 herdam esta escolha.` ao criar, `As subcategorias do grupo acompanham a troca.` ao editar.
 
-O `Natureza` de `/relatorios/categorias` continua com **duas** opções e isso não é um esquecimento:
-investimento não é um `kind` a mais do relatório, é a tela própria (spec 0006 §4). Ninguém
-"conserta" aquele filtro acrescentando duas opções.
+O `Natureza` de `/relatorios/categorias` **não** ganha `Investimento` nem `Resgate`, e isso não é um
+esquecimento: investimento não é um `kind` a mais do relatório, é a tela própria (spec 0006 §4).
+Ninguém "conserta" aquele filtro acrescentando essas duas opções.
+
+*Emenda de 18/09/2026 (ADR-032):* o seletor passou a ter **quatro** opções — `Despesas` ·
+`Despesas no crédito` · `Despesas no débito` · `Receitas` — e a nota acima continua valendo
+inteira. As duas que entraram **não são naturezas**: são recortes de conta da MESMA natureza
+`expense` (cartão de crédito de um lado, todas as outras contas do outro; crédito + débito =
+`Despesas`), e é exatamente isso que as autoriza onde investimento/resgate seguem proibidos. A URL
+guarda a palavra (`?natureza=despesas-credito` / `?natureza=despesas-debito`) e a tela a traduz para
+`{kind: expense, accountGroup: credit|debit}` — `accountGroup` nunca viaja pela URL. O rótulo
+continua `Natureza` porque é como o usuário chama esse filtro, e não porque as quatro sejam
+naturezas. Copy completa na tabela E6a (i).
 
 **Aviso da troca de natureza** (ADR-029c) — `Alert tone="warning"`, **abaixo** do `Select` (a ordem
 de leitura é escolha → consequência), exibido só quando a natureza escolhida difere da atual **e**
@@ -2067,8 +2444,9 @@ arquivadas, o balde precisa de chave própria (`groupKey`) — e não do rótulo
    existe** — nem moldura vazia, nem doze linhas de `0,00`.
 9. Os números são uma `<dl>` de duas colunas com valores tabulares à direita — **não** são quatro
    cartões com número gigante, ícone e percentual de variação.
-10. Zero número derivado: sem líquido, sem saldo investido, sem "% do mês anterior", sem seta de
-    tendência, sem projeção.
+10. Zero número derivado **nesta tela**: sem líquido, sem saldo investido, sem "% do mês anterior",
+    sem seta de tendência, sem projeção. (O painel `/` é a exceção declarada — lá o investimento do
+    mês é um líquido com sinal, por decisão de 18/09/2026.)
 11. A lista é `<table>` plana, sem grupo de dia e sem subtotal; `Movimento` é palavra em `--ink`,
     nunca `Badge`, nunca bolinha, nunca ícone sozinho; a página é 50, como nas outras
     listas do app.
@@ -2104,3 +2482,1121 @@ arquivadas, o balde precisa de chave própria (`groupKey`) — e não do rótulo
 24. Nenhuma frase da tela concorda em gênero com o nome de uma natureza ("uma investimento" é o
     defeito que a T4a corrigiu).
 25. Nenhum grupo sem subcategoria aparece no topo de um seletor de categoria, fora do seu lugar.
+
+## E2d — o filtro de tipo em `/lancamentos` (spec 0004 §1.6, 18/09/2026)
+
+Pedido do usuário: *"filtros melhores para ver somente despesas"*. Uma escolha única entre
+**Tudo · Receitas · Despesas · Transferências · Investimentos**, resolvida no servidor
+(`?kindGroup=` na API, `?tipo=` na URL da tela). Estende E2, E2c, E6a e E7 sem revogar nada:
+`grayscale(1)` continua sendo o aceite, a cor cromática continua com três donos, e aporte e resgate
+continuam fora de Despesas/Receitas — o filtro só **mostra** a partição que a faixa do mês já fazia
+(spec 0006 §3.5.2).
+
+**Nenhum token novo, nenhum componente novo, nenhuma dependência nova.** Quatro comportamentos
+mudam — a faixa do mês, o subtotal do dia, a faixa de pendência e o toast do atalho de categoria —,
+e é por isso que esta seção existe: sem eles o filtro seria tecnicamente verdadeiro e visualmente
+mentiroso.
+
+### (a) O controle — um `<select>` a mais na faixa, e só
+
+`Select density="compact" label="Tipo"`, na `.faixa` do `Panel`, **à direita de `Conta`**, com
+`placeholder="Tudo"` (valor vazio = a chave ausente na URL, exatamente como `Todas as contas`) e as
+opções na ordem `Receitas · Despesas · Transferências · Investimentos`. **Confirmado**, com três
+razões e uma recusa escrita:
+
+1. É o mesmo par "rótulo visível + `<select>` nativo" que a faixa já tem, que
+   `/relatorios/categorias` usa para `natureza` e que `/transferencias` usa duas vezes. Um filtro
+   novo que parece o filtro antigo é o que faz a barra ler como **uma** barra.
+2. Zero componente novo: no celular o `<select>` abre a roda do sistema; no teclado, digitar `t`
+   salta para Transferências. Um *segmented control* de cinco opções custaria um componente com
+   `role="radiogroup"`, tabindex rodante e navegação por setas (APG), ~340 px numa faixa que já tem
+   dois blocos, e duas linhas a 375 px — **não se paga**, e ainda inventaria uma forma de controle
+   que este app não tem em lugar nenhum.
+3. `Tudo` como **placeholder**, e não como opção explícita, mantém a URL canônica sem a chave: um
+   link colado sem `?tipo=` é o estado padrão, não um estado a mais para validar.
+
+**Ordem das opções** — `Receitas` antes de `Despesas`, apesar de `/categorias` abrir com Despesas:
+aqui a faixa logo ao lado lê `Entrou · Saiu`, e o seletor segue a ordem da frase que ele filtra.
+
+**Faixa com dois filtros**: os dois campos vão num `<div class="filtros">` — `display: flex;
+flex-wrap: wrap; align-items: flex-end; gap: var(--space-4)` (abaixo de 40 rem, `gap:
+var(--space-2)`) — que passa a ser o primeiro filho da `.faixa`, no lugar do `Select` solto. A
+`.faixa` continua `space-between`: filtros à esquerda, números à direita. Nenhum estilo entra no
+componente de fora (regra do design system); os dois campos continuam com largura por conteúdo e
+**embrulham** quando não cabem — a 375 px eles empilham, cada um com a sua largura, sem esticar.
+
+**URL e cache** (é trabalho do `dev-frontend-react`, mas é decisão de interface):
+
+- `BuscaDoApp` ganha `tipo?: Tipo`, com `Tipo = 'receitas' | 'despesas' | 'transferencias' |
+  'investimentos'` — allowlist em pt-BR, como `natureza`. A tradução para o `kindGroup` da API é da
+  tela, **nunca** da URL. Fora da lista, a chave some e a tela abre em Tudo.
+- **`semCategoria` é descartado quando `tipo` é `transferencias` ou `investimentos`** — em
+  `validarBusca` **e** em `aplicarNaBusca`, a mesma mecânica que já descarta `contraparte` sem
+  `conta`. A combinação não tem resultado possível (transferência não tem categoria por desenho;
+  aporte e resgate têm por definição), e uma URL colada não pode virar lista vazia sem saída.
+- O `tipo` entra na **chave da query** de `transactions` — o filtro é do servidor, e sem ele o cache
+  serviria as linhas do filtro anterior — e na `chaveDaBusca` que fecha o editor de categoria aberto
+  (a regra "trocar mês, conta ou filtro fecha" já existe).
+
+### (b) A faixa `Entrou · Saiu · Resultado` sob filtro — o ponto que justifica a tarefa
+
+Manter os três com zeros é tecnicamente verdadeiro e **visualmente mentiroso**: com
+`tipo=transferencias`, `Entrou 0,00 · Saiu 0,00 · Resultado 0,00` diz "nada aconteceu" num mês que
+moveu R$ 8.000. A regra que governa as cinco opções é uma só: **a faixa mostra o número que o
+filtro sabe responder e cala o que ele não sabe** — número que nunca varia é ruído, e número
+repetido é pior do que número ausente.
+
+| `tipo` | 1ª linha (`.resumo`) | 2ª linha (`.resumoFora`) |
+|---|---|---|
+| ausente (**Tudo**) | `Entrou 5.300,00 · Saiu 3.100,00 · Resultado +2.200,00` | `Fora destes números: 2.000,00 em aportes · 850,00 em resgates` (como hoje) |
+| `receitas` | `Entrou 5.300,00` | `Fora destes números: 850,00 em resgates` |
+| `despesas` | `Saiu 3.100,00` | `Fora destes números: 2.000,00 em aportes` |
+| `transferencias` | `Transferência não é receita nem despesa — o dinheiro só mudou de conta dentro da casa.` | — |
+| `investimentos` | `Aportes 2.000,00 · Resgates 850,00` | — |
+
+Os porquês, um a um:
+
+- **`receitas` / `despesas` mostram um número só.** Com o filtro, `expenseCents` é 0 sob receitas e
+  `incomeCents` é 0 sob despesas: exibi-los seria escrever um zero que **nunca** muda. E `Resultado`
+  seria `Entrou` (ou `−Saiu`) outra vez, com tom e sinal — o único número da faixa que carrega tom
+  passaria a repetir o vizinho, como se um mês só de receitas tivesse "resultado" igual à receita.
+  Detalhe verificável: `Entrou` sob `receitas` é **idêntico** ao `Entrou` de Tudo (o `incomeCents`
+  do contrato já exclui resgates desde o ADR-029e) — merece teste, porque um número que mudasse ao
+  filtrar denunciaria dupla contagem.
+- **A 2ª linha sobrevive ao filtro, citando só o lado do dinheiro que o filtro nomeia.** Aporte é
+  dinheiro que **saiu da conta** e não está em `Saiu`; resgate é dinheiro que **entrou** e não está
+  em `Entrou`. Quem chega por link direto em `?tipo=despesas` nunca veria a linha de Tudo, e leria
+  `Saiu 3.100,00` como tudo o que saiu. A exigência da spec 0006 §3.5.2 continua valendo inteira:
+  **o total não pode encolher sem explicação**. Sob `receitas` cita-se só resgates; sob `despesas`,
+  só aportes — citar o outro lado seria explicar uma omissão que não houve. A regra de zero da
+  E7 (g) continua: a linha existe só quando o número citado é maior que zero. Depende de **C1**.
+- **`transferencias` troca números por uma frase.** Não existe um "total movido" honesto: cada
+  transferência tem **duas pernas** na lista (somar as duas conta o dinheiro duas vezes) e, com o
+  filtro de conta ligado, só uma delas aparece — um número cujo significado muda conforme outro
+  filtro é pior do que nenhum número. A contagem já está no rodapé (`8 lançamentos — é tudo o que
+  existe no filtro`). O que a faixa precisa dizer é **por que** não há totais, e a frase é a que o
+  app já usa desde a E2c ("o dinheiro só mudou de conta"). Sem link para `/transferencias`:
+  Transferências está no menu, a dois passos, e faixa não é lugar de atalho de navegação (E7 (g)).
+- **`investimentos` usa as palavras da E7**, não `Aportado`/`Resgatado`: a E7 (a) proíbe conjugar
+  "aportar" em qualquer tela, e `Aportes`/`Resgates` são os rótulos já ratificados dos mesmos
+  números em `/investimentos`. Valores `MoneyText` **neutros, `plain`, sem sinal e sem tom** — lá
+  eles são silenciosos, e aqui são os mesmos números. **Os dois aparecem sempre, inclusive `0,00`**:
+  nesta faixa a ausência de resgate responde a uma pergunta que a pessoa está fazendo, ao contrário
+  do zero na 2ª linha de Tudo, onde seria ruído sobre um assunto que não é o dela. **Sem líquido
+  aqui**: o líquido do mês existe, e é do **painel** — lição de 18/09/2026, "quanto ficou
+  investido neste mês" —, vem pronto do servidor e responde a outra pergunta. Esta faixa é o
+  extrato do mês: os dois números são os mesmos de `/investimentos`, e lá vale "sem saldo, sem
+  líquido" (spec 0006 §3.4.2). O contrato de `/transactions` também não entrega líquido nenhum.
+
+**Carregando**: o número de `Skeleton width="4.5rem" height="1rem"` acompanha o que vai aparecer —
+três em Tudo, **um** em receitas/despesas, **dois** em investimentos e **nenhum** em
+transferências, onde a frase não depende de dado nenhum e entra já na primeira renderização.
+
+### (c) O subtotal do dia
+
+`agruparPorDia` exclui transferência do subtotal por desenho. Com `tipo=transferencias`, todo dia
+mostraria `R$ 0,00`; com `tipo=investimentos`, o subtotal do dia seria "aportes menos resgates do
+dia" — e sairia com tom e sinal, pintando o aporte de vermelho, exatamente o erro que a E7 existe
+para corrigir. O líquido do **mês** existe e é o número do painel (lição de 18/09/2026); o líquido
+de **um dia** não responde a pergunta nenhuma.
+
+**Regra, uma para as duas**: o subtotal do dia responde *"quanto este dia mudou o patrimônio da
+casa"*. Transferência e investimento **não mudam o patrimônio** — logo, com `tipo=transferencias`
+ou `tipo=investimentos` o cabeçalho do dia **não tem subtotal**: o slot `trailing` do `RowGroup` é
+omitido (nada de `0,00`, nada de contagem no lugar do dinheiro, nada de `—`), e o cabeçalho fica só
+com a data por extenso. Um zero repetido em doze dias não é um total: é uma resposta falsa a uma
+pergunta que este filtro não faz.
+
+Consequência limpa: **o sufixo `· 1 transferência` do rótulo do dia só existe em Tudo.** Sob
+`transferencias` não há subtotal para explicar (e o sufixo viraria rótulo repetido em todo
+cabeçalho); sob `receitas`, `despesas` e `investimentos` não há linha de transferência na lista.
+
+Em `receitas` e `despesas` o subtotal **fica** — todas as linhas do dia entram nele, e ele continua
+`MoneyText tone="semantic" sign="always"`, com o `sr-only "Subtotal do dia "`.
+
+> **Dívida registrada, fora do escopo desta emenda:** em **Tudo**, o subtotal do dia ainda soma os
+> aportes (eles são `expense`), enquanto a faixa do mês os exclui — a soma dos subtotais não fecha
+> com `Resultado`. É anterior a esta tarefa (a E7 mexeu na faixa, não no subtotal). Quem for
+> resolver decide entre tirar o aporte do subtotal do dia (explicando no cabeçalho do dia, como se
+> faz com a transferência) ou assumir a diferença; o `designer-ui` escreve antes de o código mudar.
+
+### (d) A faixa de pendência precisa nomear o filtro
+
+Sob filtro, `uncategorizedCount` conta o **filtro** (decisão do `arquiteto`, e é o que já acontece
+com o filtro de conta — duas fontes para o mesmo número divergem). Então a frase tem de nomear o
+que contou: `3 lançamentos de setembro estão sem categoria`, numa tela que mostra só receitas, é
+mentira sobre o mês.
+
+| `tipo` | Frase (plural / singular) |
+|---|---|
+| Tudo | `12 lançamentos de setembro estão sem categoria. Eles não entram…` / `1 lançamento … está … Ele não entra…` (como hoje) |
+| `receitas` | `3 receitas de setembro estão sem categoria. Elas não entram…` / `1 receita … está … Ela não entra…` |
+| `despesas` | `9 despesas de setembro estão sem categoria. Elas não entram…` / `1 despesa … está … Ela não entra…` |
+| `transferencias` · `investimentos` | **não existe** — a contagem é 0 por construção |
+
+O fecho da frase é o de hoje, palavra por palavra: `… não entram em nenhum orçamento, e nos
+relatórios aparecem como "Sem categoria".` (singular: `… não entra em nenhum orçamento, e nos
+relatórios aparece como "Sem categoria".`). Os textos completos estão em (h).
+
+- **Zero código novo para sumir.** Com `transferencias` e `investimentos` a contagem do filtro é
+  estruturalmente 0 (transferência não tem categoria; aporte e resgate **têm**, senão não estariam
+  no filtro), e a faixa já some sozinha quando zera. Nenhum caso especial — e nenhum
+  `semCategoria` possível nesses dois tipos, por (a).
+- **O botão preserva o tipo**: `Ver só essas 3` liga `semCategoria=1` **mantendo** `?tipo=receitas`.
+  Concordância obrigatória: `esses` para lançamentos, `essas` para receitas e despesas.
+- **`Categorizar automaticamente` vira `Categorizar o mês automaticamente` quando há `tipo`
+  ativo.** O diálogo é do **mês** (E2c (e)) e a frase ao lado passou a ser do filtro: o rótulo
+  antigo, ao lado de "3 receitas", prometeria 3 e faria 12. A regra dos blocos de decisão — *a ação
+  diz no próprio rótulo o que vai acontecer* — obriga o escopo a aparecer no botão assim que a
+  frase deixa de carregá-lo. Em Tudo o rótulo continua o ratificado, porque a frase já diz "de
+  setembro".
+- **A faixa `info` do filtro ativo** (`semCategoria=1`) nomeia o tipo do mesmo jeito, e a saída
+  também: `Mostrando só as despesas sem categoria de setembro.` + `Mostrar todas as despesas` — o
+  botão limpa **só** o `semCategoria`, então prometer "todos os lançamentos" seria mentira.
+
+### (e) Casca da tela: título, apoio, `caption` e vazios
+
+- **`<h1>` não muda: `Lançamentos`, sempre.** Ele é o nome da rota e recebe o foco na entrada;
+  trocar o texto a cada filtro faria a tela mudar de identidade a cada escolha. O estado vive no
+  controle e na linha de apoio.
+- **Apoio** (o `<p>` sob o `<h1>`) — cada filtro empresta a frase já ratificada da tela irmã, o que
+  ensina a partição sem uma linha de prosa a mais: Tudo `Tudo o que entrou e saiu em setembro.` ·
+  receitas `O que entrou em setembro.` · despesas `O que saiu em setembro.` · transferências `O que
+  mudou de conta dentro da casa em setembro.` (a mesma de `/transferencias`) · investimentos `O que
+  saiu para investir e o que voltou em setembro.` (a mesma de `/investimentos`).
+- **`document.title`** ganha o filtro à frente: `Despesas · Lançamentos · HomeFinance`. Em Tudo
+  continua `Lançamentos · HomeFinance`. O sufixo `· Lançamentos` é o que o distingue de
+  `Transferências · HomeFinance`, que é outra rota.
+- **`caption` da `DataTable`** (é `sr-only`, e é o que diz a quem não vê a faixa o que a tabela
+  contém): `Receitas de setembro, agrupadas por dia` · `Despesas de setembro, agrupadas por dia` ·
+  `Transferências de setembro, agrupadas por dia` · `Aportes e resgates de setembro, agrupados por
+  dia` · Tudo como hoje. Concordância no particípio.
+- **Vazios** — a precedência é `semCategoria` → `tipo` → `conta`, e **cada botão diz a dimensão que
+  limpa**. Com tipo e conta ativos, dois botões (primário limpa o tipo, secundário limpa a conta):
+  adivinhar qual a pessoa quis desfazer é pior do que oferecer os dois. Títulos e descrições em (h).
+
+### (f) As colunas sob filtro — `Movimento` entra, `Categoria` sai
+
+Duas correções de honestidade, as duas derivadas de regras já escritas:
+
+- **`tipo=transferencias`: a coluna `Categoria` não existe.** Toda linha traria a mesma
+  `Badge Transferência` — o mesmo ruído de "escrever *Novo* 59 vezes" que a spec 0004 §3.4 recusou.
+  Restam `Conta · Descrição · Valor · Ações`, e a `.secundaria` do celular mostra só o nome da
+  conta. O valor continua **neutro com sinal** (`−5.000,00` / `+5.000,00`): aqui o sinal é a
+  direção relativa à conta da linha, e é o único portador dela.
+- **`tipo=investimentos`: entra a coluna `Movimento`** (primeira, `width: 'min'`, **sem**
+  `hideBelow` — ela é o portador), com a palavra `Aporte` ou `Resgate` em `--ink`, nunca `Badge`,
+  nunca ícone (E7). Ela é derivável sem contrato novo: dentro deste filtro, `kind === 'expense'` é
+  aporte e `kind === 'income'` é resgate — o pareamento natureza↔lado do dinheiro é obrigatório no
+  servidor (spec 0006 §7.2), e o comentário no código deve dizer isso, porque a derivação **só**
+  vale aqui. E, com a palavra na tela, o valor passa a **neutro e sem sinal** (`MoneyText` puro):
+  `--income`/`--expense` e o `−` são proibidos no **valor de linha** de aporte e resgate (E7 (b);
+  o sinal do líquido do painel é outra coisa, e é do painel) — pintar o aporte de
+  vermelho ensina exatamente o erro que a E7 existe para corrigir. A regra geral que isso fixa:
+  **cor e sinal só onde a palavra não está.**
+
+Em `receitas` e `despesas` as colunas são as de hoje, com `sign="always"` mantido: uma coluna toda
+de `+` custa um caractere, mantém a tabela idêntica entre os filtros (sem salto de largura ao
+trocar) e deixa cada linha legível fora do contexto.
+
+### (g) A linha que some — o toast
+
+Com `tipo=despesas` ativo, categorizar uma linha como investimento pelo atalho da célula
+`Sem categoria` (E2c (h)) tira a linha da lista **na hora**. Sumir em silêncio é inaceitável: a
+pessoa acabou de aprender, sem querer, que a natureza da categoria muda o tipo do lançamento.
+
+- O toast continua **de sucesso** (nada falhou; ela fez o que quis) e ganha uma segunda frase:
+  `Lançamento categorizado como CDB. Ele saiu da lista: é um aporte, e a lista mostra só despesas.`
+  Sob `receitas`: `… é um resgate, e a lista mostra só receitas.`
+- Na saída com palavra-chave, a segunda frase entra depois do texto de hoje:
+  `«cdb» adicionada a CDB · mais 3 lançamentos de setembro categorizados. Este lançamento saiu da
+  lista: é um aporte, e a lista mostra só despesas.`
+- **Emenda §19 (18/09/2026), modo trocar**: sob `investimentos` toda linha é categorizada, e trocar
+  um aporte para uma categoria de despesa (ou um resgate para uma de receita) também a tira da
+  lista. Mesmo molde: `Categoria trocada de CDB para Transporte. Ele saiu da lista: é uma despesa,
+  e a lista mostra só aportes e resgates.` / `… é uma receita, e a lista mostra só aportes e
+  resgates.` Sob `despesas`/`receitas` a troca usa as duas frases já ratificadas acima. As demais
+  regras (só-este × com palavra, sujeito `Ele`/`Este lançamento`) valem iguais — ver E2c (h) §4,
+  "Depois de trocar".
+- A frase só aparece quando a natureza da categoria escolhida **contradiz o `tipo` ativo** — em
+  Tudo, e com categoria do mesmo lado, o toast é o de hoje, sem acréscimo. Com `semCategoria=1` a
+  linha também sai, e isso continua **sem** frase: ali a causa é evidente (o filtro é "sem
+  categoria" e ela deixou de estar), enquanto aqui a causa é uma regra que a pessoa não viu.
+- **Foco**: nada muda — ele já vai para a próxima lacuna calculada depois do refetch (E2c (h) 4), e
+  é justamente esse mecanismo que sobrevive a uma linha que desaparece. Merece teste. Em modo
+  trocar não há próxima lacuna: o foco vai ao controle de categoria da linha vizinha na foto de
+  antes (E2c (h) §4, "Depois de trocar").
+
+### (h) Copy pt-BR — tabela única
+
+| Onde | Texto |
+|---|---|
+| Rótulo do filtro | `Tipo` |
+| Opção vazia (placeholder) | `Tudo` |
+| Opções | `Receitas` · `Despesas` · `Transferências` · `Investimentos` |
+| Apoio do `<h1>` | `Tudo o que entrou e saiu em setembro.` · `O que entrou em setembro.` · `O que saiu em setembro.` · `O que mudou de conta dentro da casa em setembro.` · `O que saiu para investir e o que voltou em setembro.` |
+| `document.title` | `Lançamentos · HomeFinance` · `Receitas · Lançamentos · HomeFinance` · `Despesas · …` · `Transferências · …` · `Investimentos · …` |
+| `caption` da tabela | `Lançamentos de setembro, agrupados por dia` · `Receitas de setembro, agrupadas por dia` · `Despesas de setembro, agrupadas por dia` · `Transferências de setembro, agrupadas por dia` · `Aportes e resgates de setembro, agrupados por dia` |
+| Faixa — receitas | `Entrou 5.300,00` |
+| Faixa — despesas | `Saiu 3.100,00` |
+| Faixa — transferências | `Transferência não é receita nem despesa — o dinheiro só mudou de conta dentro da casa.` |
+| Faixa — investimentos | `Aportes 2.000,00 · Resgates 850,00` |
+| 2ª linha sob receitas | `Fora destes números: 850,00 em resgates` |
+| 2ª linha sob despesas | `Fora destes números: 2.000,00 em aportes` |
+| Coluna nova | `Movimento` — `Aporte` / `Resgate` |
+| Pendência — receitas | `3 receitas de setembro estão sem categoria. Elas não entram em nenhum orçamento, e nos relatórios aparecem como "Sem categoria".` / `1 receita de setembro está sem categoria. Ela não entra em nenhum orçamento, e nos relatórios aparece como "Sem categoria".` |
+| Pendência — despesas | `9 despesas de setembro estão sem categoria. Elas não entram em nenhum orçamento, e nos relatórios aparecem como "Sem categoria".` / `1 despesa de setembro está sem categoria. Ela não entra em nenhum orçamento, e nos relatórios aparece como "Sem categoria".` |
+| Botão da pendência | `Ver só esses 12` / `Ver esse lançamento` · `Ver só essas 3` / `Ver essa receita` · `Ver só essas 9` / `Ver essa despesa` |
+| Botão primário da pendência | `Categorizar automaticamente` (Tudo) · `Categorizar o mês automaticamente` (com `tipo`) |
+| Faixa `info` do filtro ativo | `Mostrando só os lançamentos sem categoria de setembro.` · `Mostrando só as receitas sem categoria de setembro.` · `Mostrando só as despesas sem categoria de setembro.` |
+| Saída da faixa `info` | `Mostrar todos os lançamentos` · `Mostrar todas as receitas` · `Mostrar todas as despesas` |
+| Vazio — receitas | `Nenhuma receita em setembro.` — `O que entra por resgate de investimento está em Investimentos, e o que vem de outra conta sua é transferência.` — `Mostrar todos os tipos` |
+| Vazio — despesas | `Nenhuma despesa em setembro.` — `Aporte em investimento está em Investimentos, e o que foi para outra conta sua é transferência.` — `Mostrar todos os tipos` |
+| Vazio — transferências | `Nenhuma transferência em setembro.` — `Transferência é o dinheiro que muda de conta dentro da casa — na importação, o app a detecta pelas palavras-chave das contas.` — `Mostrar todos os tipos` |
+| Vazio — investimentos | `Nenhum aporte ou resgate em setembro.` — `Um lançamento entra aqui quando recebe uma categoria de investimento ou de resgate.` — `Mostrar todos os tipos` |
+| Vazio — tipo + conta | `Nenhuma despesa na Nubank em setembro.` — `Troque o tipo, troque a conta, ou volte para a lista inteira.` — `Mostrar todos os tipos` (primário) + `Mostrar todas as contas` (secundário) |
+| Vazio — semCategoria + tipo | `Todas as receitas de setembro estão categorizadas.` / `Todas as despesas de setembro estão categorizadas.` — `Nenhuma receita deste mês ficou sem categoria.` / `Nenhuma despesa deste mês ficou sem categoria.` — `Mostrar todas as receitas` / `Mostrar todas as despesas` |
+| Toast — saiu por natureza | `Lançamento categorizado como CDB. Ele saiu da lista: é um aporte, e a lista mostra só despesas.` / `… é um resgate, e a lista mostra só receitas.` |
+| Toast — com palavra-chave | `«cdb» adicionada a CDB · mais 3 lançamentos de setembro categorizados. Este lançamento saiu da lista: é um aporte, e a lista mostra só despesas.` |
+| Toast — saiu sob `investimentos` (modo trocar, emenda §19) | `Categoria trocada de CDB para Transporte. Ele saiu da lista: é uma despesa, e a lista mostra só aportes e resgates.` / `… é uma receita, e a lista mostra só aportes e resgates.` |
+
+Léxico: mês por extenso e em minúsculas; `aporte`/`resgate` para o movimento e `Investimentos` só
+como nome do tipo (E7 (a)); nenhum botão diz "todos os lançamentos" quando não mostra todos.
+
+### (i) Acessibilidade
+
+- **Trocar o filtro não tira o foco do controle.** O `<h1>` recebe o foco na **entrada da rota**,
+  nunca em mudança de busca — a mesma armadilha que `CategoryReportScreen.test.tsx` já fixa para
+  `natureza`. Teste equivalente obrigatório aqui, para `Tipo` **e** para `Conta`.
+- **Nenhuma live region nova.** O `<select>` anuncia a própria opção; a contagem está no rodapé e o
+  `caption` muda junto. Duas regiões vivas simultâneas (a da `DataTable loading` e um status de
+  filtro) atropelariam uma à outra — a regra "sem duplicata" da E2c continua valendo.
+- **Contraste**: zero cor nova e zero tamanho novo. A frase das transferências reusa a classe
+  `.resumo` — `--text-13`/`--ink-muted` sobre `--surface-sunken` —, o par que esta faixa já usa
+  desde a E2; nenhuma combinação nova é criada.
+- Alvo de toque: `Select density="compact"` = `--control-h-sm` (36 px), o mesmo da faixa hoje.
+- `grayscale(1)`: o filtro é palavra no controle, o tipo é palavra no apoio, no `caption` e no
+  `document.title`, e o movimento é palavra na coluna. Nada depende de tinta.
+
+### (j) Exigências de contrato — verificar antes de implementar (padrão da spec 0004 §B)
+
+**C1 · `investedCents` e `redeemedCents` não respondem ao `kindGroup`.** Eles respondem a `month`
+e a `accountId`, como hoje, e **ignoram** o filtro de tipo. Sem isso, os dois campos vão a zero
+justamente sob `tipo=despesas`, que é onde a omissão é maior, e a 2ª linha da faixa desaparece
+contra o que o próprio contrato manda ("a tela é **obrigada** a mostrar os dois números quando
+forem maiores que zero"). É o único ponto em que o `summary` deixa de ser "do mesmo filtro", e a
+descrição do schema precisa dizê-lo com todas as letras. Responsável: `arquiteto` /
+`dev-backend-go`.
+
+**Atenção: C1 contraria o que a T1 já escreveu.** Hoje `aplicarGrupoDeTipo` entra no `WHERE` do
+`Summary` inteiro, com a justificativa — correta para os outros campos — de que "o resumo fala
+exatamente da janela que a lista mostra". A exceção pedida vale **só** para estes dois campos, e o
+motivo é que eles não descrevem a janela: eles descrevem **o que ficou de fora dela**. Um campo
+cujo trabalho é nomear a omissão não pode ser silenciado pelo filtro que aumenta a omissão.
+
+*Degradação aceita, se o `arquiteto` recusar C1* — a tela **não** fica bloqueada: sob `receitas` e
+`despesas` a 2ª linha simplesmente não existe, e a linha de apoio passa a nomear o limite em
+palavras, `O que saiu como despesa em setembro.` / `O que entrou como receita em setembro.`
+(em vez de `O que saiu em setembro.` / `O que entrou em setembro.`). É pior — a fronteira vira
+adjetivo em vez de número —, mas é honesto e custa zero. A escolha entre as duas é do `arquiteto`,
+e o `dev-frontend-react` implementa a que estiver decidida quando começar.
+
+**C2 · `uncategorizedCount` e `count` respondem ao `kindGroup`** — é o que (d) e o rodapé de
+paginação assumem, e é o que a T1 já faz. Escrito aqui porque a faixa de pendência depende disso
+para não mentir.
+
+### Checklist anti-cara-de-IA — E2d (aplicar com a tela pronta)
+
+1. O filtro é um `<select>` nativo com rótulo visível `Tipo` — não é *segmented control*, não é
+   grupo de "pills", não é aba, não é chip removível, não é menu com ícones.
+2. Nenhuma opção ganhou cor, bolinha, ícone ou contador dentro do `<select>`.
+3. Com `tipo=transferencias` **não existe** `0,00` em lugar nenhum: nem na faixa, nem no cabeçalho
+   do dia. Uma coluna de zeros repetidos reprova.
+4. Com `tipo=investimentos` nenhum valor é vermelho, verde ou com sinal; `Aporte`/`Resgate` é
+   palavra em `--ink`, nunca `Badge`, nunca ícone.
+5. A faixa de pendência **nomeia o tipo** e concorda em gênero (`essas 3 receitas`, nunca
+   `esses 3 receitas`); o botão primário diz `o mês` quando age sobre o mês.
+6. Nenhum botão promete mais do que limpa (`Mostrar todas as despesas` quando só o `semCategoria`
+   sai).
+7. Nenhuma linha some em silêncio: o toast diz que saiu e por quê.
+8. `grayscale(1)`: o estado do filtro continua legível no controle, no apoio, no `caption` e no
+   `document.title`.
+9. Nenhuma medida, cor ou raio novo em `TransactionsScreen.module.css` — só `.filtros`, com tokens.
+10. Copy da tabela (h) palavra por palavra; nenhum "filtros avançados", "visão geral", "dashboard",
+    "insights" ou emoji.
+
+## E4a — o painel: a faixa de resumo do mês (spec 0008, 18/09/2026)
+
+Primeira fatia da E4. O painel deixa de ser placeholder e passa a responder três perguntas do mês
+selecionado — quanto entrou, quanto o cartão comeu, quanto ficou investido. Estende E2, E2c, E6a,
+E7 e E2d sem revogar nada: `grayscale(1)` continua sendo o aceite, a cor cromática continua com
+três donos, e aporte e resgate continuam fora de receita e despesa.
+
+**Nenhum token novo, nenhum componente base novo, nenhuma cor cromática.** A faixa é a terceira
+ocorrência de um idioma que o app já tem (a `<dl>` de `TransferPairPanel` e da `ColunaDeNumeros` de
+`/investimentos`) e usa variantes de `MoneyText` que já existem. Uma tela que não pede nada novo é
+o sinal de que a identidade está de pé.
+
+Arquivos: `features/home/components/MonthSummaryBand.tsx` + `.module.css` (a faixa),
+`features/home/components/HomeScreen.tsx` + `.module.css` (a coluna e o cabeçalho) e
+`features/home/api/dashboard.ts` (a consulta). `LedgerPreview.*` foi **apagado** com o placeholder.
+
+### (a) Forma: uma `<dl>` de três linhas, e não a faixa inline de `/lancamentos`
+
+`Panel padding="none"` → `<section aria-labelledby>` → `<h2 class="tituloDaSecao">Resumo de
+setembro</h2>` → `<dl class="lista">` com três `.linha` (`<dt>`/`<dd>`), separadas por
+`1px solid var(--border)`.
+
+```
++- main (casca) ------------------------------------------------------------+
+|                                                                           |
+|  Ola, Bruno.                          <- <h1> Fraunces --text-28 / 600     |
+|  sexta-feira, 18 de setembro de 2026  <- <p> --text-15 / --ink-muted       |
+|                                                                           |
+|  +- Panel padding="none" - 38rem - 1px --border - --radius-md ---------+   |
+|  | Resumo de setembro       <- <h2> --font-ui --text-13/600 --ink-muted|   |
+|  |                                                                     |   |
+|  | Receita do mes                                       R$ 5.000,00    |   |
+|  | 3 lancamentos                                                       |   |
+|  | ------------------- 1px solid var(--border) ----------------------- |   |
+|  | Gasto no cartao de credito                             R$ 800,00    |   |
+|  | 2 lancamentos                                                       |   |
+|  | ------------------------------------------------------------------- |  |
+|  | Investido no mes                                    +R$ 1.650,00    |   |
+|  | 2 lancamentos                                                       |   |
+|  +---------------------------------------------------------------------+   |
+|                                                                           |
+|  (nada abaixo — a tela acaba aqui, e é para acabar aqui)                   |
++---------------------------------------------------------------------------+
+```
+
+Celular (375 px): **nenhuma mudança de estrutura** — é a virtude da `<dl>`, que já é uma coluna. Só
+os paddings encolhem; o rótulo longo quebra em duas linhas e o número fica ancorado na primeira.
+
+```
++------------------------------------+
+| Ola, Bruno.                        |
+| sexta-feira, 18 de setembro de 2026|
+| +--------------------------------+ |
+| | Resumo de setembro             | |
+| | Receita do mes     R$ 5.000,00 | |
+| | 3 lancamentos                  | |
+| | ------------------------------ | |
+| | Gasto no cartao      R$ 800,00 | |  <- rotulo quebra; numero na 1a linha
+| | de credito                     | |
+| | 2 lancamentos                  | |
+| | ------------------------------ | |
+| | Investido no mes  +R$ 1.650,00 | |
+| | 2 lancamentos                  | |
+| +--------------------------------+ |
++------------------------------------+
+```
+
+Conta a 375 px: 375 − 2×24 (padding do `<main>`) − 2 (borda) − 2×12 (`--space-3`) = **301 px**
+úteis; 216 (rótulo do cartão a `--text-15`) + 16 + 85 = 317 > 301, então a quebra é real e está
+desenhada, não improvisada. Nada some e nada rola na horizontal.
+
+Por que `<dl>` e não o `.resumo` inline de `/lancamentos`, que é a faixa vizinha:
+
+1. **Papel diferente.** Lá a faixa é acessório de barra de ferramentas sobre uma tabela
+   (`--text-13`, `--ink-muted`, dentro da `.faixa` em `--surface-sunken`). Aqui ela **é** o conteúdo
+   da tela: um parágrafo de 13 px como único conteúdo de uma página seria nota de rodapé fingindo
+   ser página. O léxico, os tokens e a regra de sinal continuam idênticos — muda o peso, porque
+   mudou o papel.
+2. **Cada número tem contagem.** Seis valores numa frase inline não se lê; em `<dl>` a contagem é a
+   segunda linha do `<dt>`, exatamente como em `/investimentos`.
+3. **Três ocorrências fazem um padrão do produto** — e é isso que faz o app parecer de um estúdio.
+
+**Empilhada, nunca em três colunas.** Os três números são do mesmo período: empilhados, alinham na
+mesma borda direita e a leitura vertical tabular funciona. Em três colunas haveria três bordas
+direitas diferentes, nenhuma comparação possível, e a silhueta do grid de cards que a lista de
+rejeição proíbe.
+
+**Ordem: `Receita do mês` · `Gasto no cartão de crédito` · `Investido no mês`** — a gramática
+`Entrou · Saiu · Resultado` da faixa vizinha: entrada, saída, e o derivado com sinal sempre por
+último. **Ratificada pelo usuário em 18/09/2026.** A enumeração da spec 0008 §2 (investimento
+primeiro) é ordem de **escopo**, vinda da entrevista, e nenhum parágrafo dela fixa ordem de tela:
+esta é a ordem da tela, e ela não muda sem nova decisão do usuário.
+
+**Cabeçalho da tela**: o `<h1>` continua sendo a saudação (`Olá, Bruno.`, Fraunces `--text-28`) com
+a data de **hoje** como apoio — é a única nota doméstica do produto. O `<h2>` da faixa é quem nomeia
+o **mês selecionado**, e é ele que impede a confusão entre as duas datas. `document.title` passa a
+`Painel · HomeFinance`, alinhado ao item de menu e ao padrão das outras telas.
+
+**Largura**: `.pagina { max-inline-size: 38rem }` — rótulo mais longo (216 px) + gap + valor mais
+largo (130 px) = 370 px de mínimo; 38rem dá folga sem virar linha-guia pontilhada. Quando os demais
+blocos da E4 (saldo por conta, vencimentos, top categorias) chegarem, a página vai a `62rem` e a
+faixa vira o primeiro bloco da grade. **Até lá não existe moldura vazia prometendo o futuro**: a
+regra da casca — *item que não leva a lugar nenhum não é criado* — vale igual para bloco de tela.
+`min-block-size: 100dvh`, `max-inline-size: 1120px`, `margin-inline: auto` e fundo próprio são da
+**casca**: o painel duplicava os quatro e levava padding em dobro.
+
+**Medidas** (`MonthSummaryBand.module.css`, só tokens): `.tituloDaSecao` `padding: var(--space-4)
+var(--space-4) 0`, `--font-ui`, `--text-13`, peso 600, `--ink-muted`; `.lista` `padding:
+var(--space-2) var(--space-4) var(--space-4)`; `.linha` `display: flex; align-items: baseline;
+justify-content: space-between; gap: var(--space-5); padding-block: var(--space-3)`; `.termo`
+`display: flex; flex-direction: column; gap: 2px; color: var(--ink-muted)`; `.contagem` `--text-13`,
+`--ink-muted`, `tabular-nums`; `.valor { flex: none }` (o corpo e o peso vêm do `MoneyText`). Abaixo
+de 40rem só os paddings caem para `var(--space-3)` e o `gap` da linha para `var(--space-4)`.
+
+### (b) Sinal e tom — a faixa é cromaticamente silenciosa
+
+| Linha | `MoneyText` |
+|---|---|
+| `Receita do mês` | `format="currency" emphasis="total"`, neutro, sem sinal |
+| `Gasto no cartão de crédito` | `format="currency" emphasis="total"`, neutro, sem sinal |
+| `Investido no mês` | `format="currency" sign="always" emphasis="total"`, **neutro** |
+
+- **Receita e cartão sem tom**: a palavra já diz a direção, e pintar os dois gastaria
+  `--income`/`--expense` em informação que o texto carrega. É a regra literal de `Entrou`/`Saiu`.
+- **O líquido não recebe tinta**, exatamente como o `Líquido` de `/transferencias`. `--expense`
+  diria "você gastou" sobre um resgate, que é dinheiro da casa voltando; `--income` diria "você
+  ganhou" sobre um aporte, que é dinheiro que continua sendo dela. É o erro que a E7 existe para
+  corrigir (E7 (b)), e a E2d (f) já escreveu que "o sinal do líquido do painel é outra coisa".
+- Os três com `emphasis="total"` (`--text-18`, peso 700): mesmo mês, mesmo peso na pergunta.
+  **Nenhum número hero** — `hero` é o furo da rosca da E6a.
+- `format="currency"` (e não o `plain` das tabelas) porque aqui não há cabeçalho de coluna dizendo
+  que é dinheiro; mesmo motivo do número central da rosca em `/relatorios/categorias`. A spec 0008
+  §3.3 fixa o literal `+R$ 2.000,00` / `-R$ 350,00`.
+- **Nenhuma aritmética de dinheiro na tela**: `investmentNetCents` chega pronto do servidor.
+  Subtrair aportes e resgates no cliente criaria uma segunda fonte para o mesmo número (ADR-003).
+
+**Sinal E palavra** (aceite 20 da spec). O sinal é o portador visual; a palavra mora na segunda
+linha do `<dt>`, colada à contagem, e só existe quando há o que explicar: `< 0` →
+`2 lançamentos · os resgates superaram os aportes`; `= 0` com movimento →
+`2 lançamentos · aportes e resgates se anularam`; `> 0` → só a contagem. Nenhuma delas conjuga
+**aportar** (E7 (a)). A linha do zero-com-movimento existe pelo mesmo motivo que a frase de
+equilíbrio de `/transferencias`: `R$ 0,00` ao lado de `2 lançamentos` é contradição silenciosa.
+
+O glifo do menos é **o que o `Intl` emite** — hífen-menos, como `MoneyText.test.tsx` já fixa. O
+`−` de qualquer documento é tipografia de markdown, e teste que o cole falha. Nenhuma normalização
+de glifo fora do `MoneyText`.
+
+### (c) Estados
+
+Precedência: `erro` → `carregando` → `linha sem cadastro (traço)` → `mês zerado (R$ 0,00)`.
+**A faixa nunca some**: mês sem movimento mantém os três números em `R$ 0,00` — sumir faria a
+pessoa achar que a tela quebrou.
+
+1. **Carregando (1ª carga)**: `Skeleton width="4.5rem" height="1rem"` em cada `<dd>` e **sem** a
+   linha de contagem (contagem inventada é pior que ausência); `aria-busy` na `<section>`. Nunca
+   zeros provisórios: zero é um valor, e mostrá-lo antes da resposta é mentir.
+2. **Troca de mês** (refetch com dado em tela): `placeholderData: keepPreviousData`, `aria-busy` e
+   `opacity: 0.6` com `transition: opacity var(--motion-base) var(--ease)` — o mesmo dispositivo de
+   `/investimentos`. Trocar de mês é a interação principal do painel; o quadro não pode piscar.
+3. **Mês zerado**: `R$ 0,00` e `nenhum lançamento` nas três linhas.
+4. **Casa sem cartão / sem categoria de investimento**: a `<dd>` vira
+   `<span aria-hidden="true">—</span><span class="sr-only">sem valor</span>` (o dispositivo de
+   `CelulaData` na revisão de importação) e o slot da contagem recebe a frase mais um `TextLink`
+   com o `mes`: `Nenhum cartão de crédito cadastrado · Ir para contas` · `Nenhuma categoria de
+   investimento ainda · Ir para categorias`. É `TextLink` e não `Button`: navegar é trabalho de
+   link. **Traço aqui não contradiz "zero é um valor, nunca travessão" (E7 (d.2))**: lá o travessão
+   substituiria um zero verdadeiro; aqui ele diz que o conceito não existe nesta casa. São estados
+   diferentes, e distingui-los é a razão de o contrato trazer `creditCardAccountCount` e
+   `investmentCategoryCount`.
+   **Condição obrigatória — o cartão arquivado:** gasto de cartão arquivado conta no mês, mas o
+   contador só conta cartão vivo (spec 0008 §6). Logo o traço exige os **três** campos zerados
+   (`creditCardAccountCount === 0 && creditCardExpenseCents === 0 && creditCardExpenseCount === 0`;
+   o mesmo trio para investimento). Havendo qualquer valor ou qualquer contagem, **o número ganha**:
+   nunca se esconde dinheiro por causa de um contador de cadastro. Tem teste próprio.
+5. **Erro (rede/500)**: `Alert tone="error" title="Não foi possível carregar o resumo do mês."` com
+   `messageForError` e `Tentar de novo` (`loading={isFetching}`) **no lugar do `Panel`**; o
+   cabeçalho continua utilizável. 401 é da casca, como em toda tela.
+
+**Um pedido de rede, e um só.** É proibido buscar `/accounts` ou `/categories` no painel para
+decidir estado vazio. Chave de cache `["transactions", "dashboard", mes]` — sob o prefixo
+`transactions` pelo motivo da ADR-027: categorizar em qualquer tela tem de reler estes números,
+senão o painel diverge da tela de origem.
+
+### (d) Acessibilidade
+
+- O par `<dt>`/`<dd>` é o nome acessível de cada número; o valor falado sai do `sr-only` interno do
+  `MoneyText` (`R$ 350,00 negativos`). A contagem mora no `<dt>`, nunca na `<dd>` — ela qualifica o
+  termo; na `<dd>` viraria um segundo valor concorrendo com o dinheiro.
+- **Sem sufixo `sr-only` de período nos rótulos**, ao contrário da E7 (d): lá quatro rótulos se
+  repetiam entre duas colunas; aqui os três são únicos e o `<h2>` associado já nomeia o mês.
+  Repeti-lo seria a tagarelice que a E7 (j) condena.
+- `sr-only` entra em exatamente dois lugares: dentro do `MoneyText` e no `sem valor` do traço.
+- `aria-busy` vai na `<section>` (1ª carga e refetch) e só nela. **Nenhuma live region**: o mês já é
+  anunciado pelo `<output aria-live="polite">` do `MonthNavigator`, e três valores a cada seta
+  atropelariam esse anúncio.
+- Foco no `<h1>` na entrada da rota (`tabIndex={-1}`, anel só em `:focus-visible`); trocar de mês
+  não mexe no foco. Alvos: os dois `TextLink` são inline (exceção da WCAG 2.5.8); o `Tentar de novo`
+  é `Button` a `--control-h`.
+- Contraste: `--ink` sobre `--surface` nos números, `--ink-muted` nos rótulos e contagens, nenhuma
+  combinação nova, nenhum texto abaixo de `--text-13`. `prefers-reduced-motion`: sem a transição.
+
+### (e) Copy pt-BR — tabela única
+
+| Onde | Texto |
+|---|---|
+| `document.title` | `Painel · HomeFinance` |
+| `<h1>` | `Olá, Bruno.` · sem sessão `Olá.` · carregando `Skeleton` + `sr-only` `Carregando sua conta` |
+| Apoio do `<h1>` | `sexta-feira, 18 de setembro de 2026` (data de **hoje**) |
+| `<h2>` da faixa | `Resumo de setembro` (sem o ano — ele está no seletor da casca) |
+| Rótulos, nesta ordem | `Receita do mês` · `Gasto no cartão de crédito` · `Investido no mês` |
+| Contagem | `3 lançamentos` / `1 lançamento` / `nenhum lançamento` |
+| De onde sai cada contagem | a contagem acompanha **o seu** número, um campo por linha: `incomeCount`, `creditCardExpenseCount` e `investmentCount`. O contrato **não** ganhou um décimo campo, e nenhuma contagem é somada, derivada ou reaproveitada de outra linha |
+| Líquido negativo | `2 lançamentos · os resgates superaram os aportes` |
+| Líquido zero com movimento | `2 lançamentos · aportes e resgates se anularam` |
+| Sem cartão | `—` (`sr-only` `sem valor`) — `Nenhum cartão de crédito cadastrado` · `Ir para contas` |
+| Sem categoria de investimento | `—` (`sr-only` `sem valor`) — `Nenhuma categoria de investimento ainda` · `Ir para categorias` |
+| Erro | `Não foi possível carregar o resumo do mês.` — `Tentar de novo` |
+
+Léxico: mês por extenso e em minúsculas; `aportes`/`resgates` como substantivos, nunca o verbo
+conjugado; `Ir para categorias` é o rótulo já ratificado na E7. Palavras proibidas nesta tela:
+"visão geral", "dashboard", "insights", "seu mês em números", "patrimônio", "rentabilidade", e
+qualquer exclamação ou emoji.
+
+### Checklist anti-cara-de-IA — E4a (aplicar com a tela pronta)
+
+1. **Um** `Panel`, três linhas separadas por `1px solid var(--border)`: nenhum cartão por número,
+   nenhuma sombra, nenhum fundo tingido, nenhum ícone ao lado de valor.
+2. Nenhum número acima de `--text-18`; sem `hero`, sem número centralizado.
+3. `grayscale(1)` não muda nada — `--income`, `--expense` e `--warning` **não aparecem** no
+   `MonthSummaryBand.module.css`.
+4. O líquido negativo tem três portadores: o `-`, a frase e o `sr-only` `negativos`.
+5. Exatamente três números: nenhum quarto derivado, nenhuma barra de progresso, nenhum mini-gráfico,
+   nenhuma seta de tendência, nenhuma comparação com o mês anterior.
+6. Sem cartão → traço; cartão sem gasto → `R$ 0,00`; cartão arquivado com gasto → o número aparece.
+7. Carregando não mostra zero provisório nem contagem inventada.
+8. Nenhuma moldura vazia prometendo saldo por conta, vencimentos ou top categorias.
+9. `Gasto no cartão de crédito` nunca vira `Gastos`, `Despesas` ou `Gasto do mês` — o rótulo é a
+   cerca do número, e encurtá-lo transformaria um parcial em total.
+10. A faixa é `<dl>` de verdade, com `<h2>` real associado por `aria-labelledby`.
+11. Zero medida, cor ou raio fora dos tokens em `MonthSummaryBand.module.css` e
+    `HomeScreen.module.css`.
+12. `LedgerPreview` e a copy de placeholder foram apagados, não escondidos.
+13. Copy da tabela (e) palavra por palavra; nenhum emoji.
+14. Um único pedido de rede monta a faixa; nada de `/accounts` ou `/categories` para decidir vazio.
+
+---
+
+## Spec 0010 — a tela /ia: exportar prompt, importar palavras-chave, reprocessar (21/09/2026)
+
+A tela `/ia` é a fronteira do produto com o mundo de fora. **O aplicativo nunca fala com IA**: não há
+cliente, chave de API nem chamada de rede para provedor nenhum (spec 0010 §2.2). O app escreve um
+texto, a pessoa leva esse texto a uma IA de fora, e traz a resposta de volta em JSON. O transporte é
+a pessoa — e é isso que o desenho inteiro desta tela existe para tornar óbvio.
+
+A entrega é fatiada em três (spec 0010 §10.2). Este bloco descreve a tela inteira; a fatia **E9a**
+implementa o item de menu, a janela de trabalho e a seção **Exportar**.
+
+### (a) Casca — a barra do celular fecha em **sete** células
+
+`IA` é o oitavo destino do produto, e **não** ganha célula na barra inferior. Regra nova, e ela vale
+para tudo que vier depois: **ferramenta não ocupa célula da barra.**
+
+A célula da barra mede `(viewport − 16 − (N − 1) × 2) / N` no content box (16px são os dois
+`--space-2` de padding da barra; 2px é o `gap` da grade). O rótulo precisa de **47px** — a largura de
+`Transfe-` a `--text-12`, a maior sílaba inicial da navegação. Abaixo disso a barra vira só-ícone,
+por uma consulta de container cujo piso é `N × 47 + (N − 1) × 2`.
+
+| Viewport | Célula com 7 | Célula com 8 | Piso só-ícone |
+|---|---|---|---|
+| 320 px | 41,7 px | 36,3 px | com 7 células: **341 px** (`21.3125rem`) |
+| 360 px | 46,9 px | 40,8 px | com 8 células: **390 px** (`24.375rem`) |
+| 375 px | 49,6 px | 43,1 px | |
+| 390 px | 51,7 px | 45,0 px | |
+| 393 px | 52,1 px | **45,4 px** | |
+| 412 px | 54,9 px | 47,8 px | |
+| 430 px | 57,4 px | 50,0 px | |
+
+A leitura é direta. Com **sete** células, só o aparelho de 320px perde os rótulos. Com **oito**, o
+piso sobe para 390px de content box e os rótulos de **toda** a navegação apagam em 360, 375, 390 e
+393 px de viewport — praticamente todo celular em pé. Um item novo não cobra esse preço dos sete que
+já estavam lá; e o rótulo perdido não seria o do item novo, seriam os dos sete existentes.
+
+**Onde `IA` vive, então:**
+
+- **Desktop (≥ 52rem):** último item da lateral, depois de `Categorias`, como **primeiro item do
+  grupo "ferramentas"** — `border-block-start: 1px solid var(--border)` no `<li>`, com
+  `margin-block-start` e `padding-block-start` de `var(--space-2)`. Um filete, e não um cabeçalho de
+  grupo em caixa alta: o que separa superfícies neste projeto é 1px de borda.
+- **Abaixo de 52rem:** o `<li>` recebe `display: none` (sai da grade, e a barra continua com sete
+  colunas) e o destino aparece no `UserMenu` — um `<hr>` e um `<Link to="/ia" search={{ mes }}>` com
+  a forma de `.item` do próprio menu, `PromptIcon size={16}` no slot `.mark` e `aria-current="page"`
+  quando ativo. O clique **fecha o popover à mão** (`panelRef.current?.hidePopover()`):
+  `popover="auto"` fecha por light dismiss e por ESC, **não** por clique dentro do painel, e o menu
+  ficaria aberto por cima do `<h1>` que acabou de receber o foco.
+- O gatilho do menu passa a se chamar **`Menu de {nome}`** (era `Conta de {nome}`) nas **duas**
+  faixas. Ele deixou de ser só a conta, e um nome acessível que muda com a largura da janela seriam
+  duas interfaces no mesmo botão.
+
+### (b) `PromptIcon` — um bloco de texto entre dois colchetes
+
+```
+<path d="M9.25 4.75H5.75a1 1 0 0 0-1 1v12.5a1 1 0 0 0 1 1h3.5" />
+<path d="M14.75 4.75h3.5a1 1 0 0 1 1 1v12.5a1 1 0 0 1-1 1h-3.5" />
+<path d="M8.75 9.25h6.5" />  <path d="M8.75 12.25h6.5" />  <path d="M8.75 15.25h3.75" />
+```
+
+Contrato do conjunto: `viewBox 24`, traço 1.5, `currentColor`, cantos `round`, massa óptica entre
+4,75 e 19,25, `IconProps` de `components/icons/types.ts`. Os colchetes são **espelhados** — eles são
+a fronteira do app nos dois lados da viagem —, as três linhas formam um parágrafo com a última curta,
+e **nada atravessa os colchetes**: o que sai, sai inteiro e pela mão da pessoa.
+
+**Recusados, e o motivo importa tanto quanto o desenho:** robô, varinha mágica, faíscas/sparkles,
+cérebro e balão de fala (são o clip-art de "IA", e nenhum deles diz o que a tela faz); **duas setas
+opostas** (colidiria com o `TransfersIcon`, que já é o ícone de transferência interna); engrenagem e
+raio (dizem "automático", e aqui **nada** é automático — nem o reprocessamento); `<>` e `{}` (dizem
+"código" a quem só vai copiar texto).
+
+### (c) A janela de trabalho — uma só, para as três seções
+
+A URL publica `?mes=2026-09` (o que a casca já publica) **mais `?meses=3`** (novo: 1 a 3, padrão 3).
+A janela é de **competência**, em meses civis, e **termina** no mês escolhido no alto da página —
+nunca em datas, porque as rotas de reprocessamento só falam mês (spec 0010 §10, achado A2) e "3 meses
+a partir do dia 15" não tem resposta.
+
+`3` é o padrão e **a URL canônica não escreve a chave**, como `natureza` e `tipo` em `app/search.ts`;
+valor fora de 1–3 some no portão e a tela abre na janela padrão, em vez de virar tela de erro.
+
+A faixa é a mesma de `/lancamentos` e `/relatorios/categorias` — recuada, `--surface-sunken`, para
+ler como barra de ferramentas e não como mais uma linha de dado — com um `Select density="compact"`
+`label="Período"` cujas opções escrevem os meses **resolvidos**:
+
+| Valor | Opção |
+|---|---|
+| 3 | `3 meses · julho a setembro` |
+| 2 | `2 meses · agosto e setembro` |
+| 1 | `1 mês · setembro` |
+
+"Últimos 3 meses" obrigaria a pessoa a contar de cabeça qual é o período — e é exatamente o período
+que ela está prestes a exportar para fora. À direita, em `--text-13`/`--ink-muted`:
+`Vale para as três seções. A janela termina no mês escolhido no alto da página.`
+
+**Uma função só** deriva tudo: `janelaDeTrabalho(mes, meses)` em `features/ai/janela.ts`, devolvendo
+`{ fromMonth, toMonth, meses: ['2026-07', '2026-08', '2026-09'] }`, mais `rotuloDaJanela` (a frase) e
+`nomeDoArquivoDoPrompt` (o nome do `.md`). **Nenhuma seção recalcula mês por conta própria** — três
+derivações seriam três janelas se contradizendo no dia em que uma delas esquecesse a virada de ano.
+
+**Regra de frescor:** trocar o mês da casca ou o tamanho da janela **descarta o resultado das outras
+seções** e publica `A janela mudou — confira de novo para medir o impacto no novo período.` Na E9a
+isso é a `key={fromMonth-toMonth}` da seção Exportar (que zera o "Copiado." e o `<details>` da janela
+anterior); o aviso nasce com a E9b, quando existir resultado a descartar — aviso sem objeto seria
+mentira.
+
+### (d) A tela — três seções empilhadas, sempre abertas, numeradas no `<h2>`
+
+`max-inline-size: 62rem`, coluna única, `gap: var(--space-4)`. `<h1>IA</h1>` com `tabIndex={-1}`
+recebendo foco na entrada da rota (`useFocoNoTitulo`), `document.title = 'IA · HomeFinance'`. Apoio:
+`O app escreve o pedido, você leva a uma IA de fora e traz a resposta de volta. Nada sai daqui
+sozinho.` Depois a faixa da janela e as três seções, cada uma um `Panel as="section" padding="none"`:
+
+1. `1 · Exportar o prompt`
+2. `2 · Importar o que a IA respondeu`
+3. `3 · Reprocessar`
+
+**Não são abas, não é acordeão, não é wizard.** O fluxo **não é linear**: dá para importar sem ter
+exportado nesta sessão, e dá para reprocessar sem ter importado nada. Os números dizem a ordem
+**recomendada**, não uma sequência obrigatória — por isso são **texto no `<h2>`**, e nunca bolinhas
+numeradas ligadas por linha. O `ImportStepper`, que marca passos de um fluxo que é mesmo sequencial,
+**não entra aqui**.
+
+`padding="none"` porque o `<pre>` e o `<summary>` sangram até a borda do painel; o `<h2>` numerado
+mora no conteúdo, com o recuo dele, e a `<section>` recebe nome acessível pelo `titleId` do `Panel`.
+
+Na E9a as seções 2 e 3 são renderizadas **sem controle nenhum** — nem botão desabilitado, nem campo
+morto — com uma frase que começa por `Ainda não está no ar.` e diz o que vai acontecer ali. Elas
+existem para a numeração ser verdadeira: um `1 ·` sozinho anunciaria um 2 e um 3 que a tela não
+mostra. O que a regra do projeto proíbe é **prometer um caminho que não leva a lugar nenhum**; uma
+frase honesta sobre o que ainda não chegou não é isso.
+
+### (e) A seção Exportar — e o aviso como prosa
+
+A ordem é normativa, e é esta:
+
+1. **Apoio:** `O texto que você cola numa IA de fora — ChatGPT, Claude, a que você usar — para ela
+   propor palavras-chave e categorias.`
+2. **O aviso**, em **três** linhas. A primeira em `--text-15`/`--ink`, com `<strong>` em dois
+   trechos: `Este texto leva **as descrições e os valores das suas movimentações** do período. O
+   aplicativo não envia nada: **quem copia e cola numa IA de fora é você**.` As outras duas em
+   `--text-13`/`--ink-muted`: `As descrições vão como você as vê no app — e costumam trazer o nome
+   de quem pagou ou recebeu, e o que a pessoa escreveu na mensagem do Pix.` e `Não vão: saldos,
+   instituição, agência e número de conta, dias de fatura, seu nome e e-mail de cadastro, nem
+   identificador de lançamento.`
+3. **Estatísticas numa linha**, `--text-13`/`--ink-muted`/`tabular-nums`:
+   `540 linhas · 32 descrições distintas · 4 contas · 41 categorias`, com
+   `· N descrições ficaram de fora (as menos frequentes)` quando `truncatedDescriptions > 0`, e
+   `· nenhuma movimentação no período` (no lugar do segmento de descrições, que seria `0`) quando a
+   janela não teve movimento. **Nunca** três cartões com número gigante.
+   `540 linhas` é o tamanho do **texto**, contado uma vez e exibido também no `<summary>`: é a mesma
+   pergunta nos dois lugares — quanto você está prestes a colar em outro lugar.
+4. **Ações:** `Copiar o prompt` (primary) · `Baixar .md` (secondary) · `<output aria-live="polite">`
+   com `CheckIcon size={14}` + `Copiado.` em `--accent`, sumindo após 6 s. **O rótulo do botão não
+   muda ao copiar** — um botão que vira "Copiado!" some como botão justo quando a pessoa quer copiar
+   de novo.
+5. **`<details>` fechado** `Ver o texto (540 linhas)` → `<pre>` dentro de uma `<section>` rolável,
+   `--surface-sunken`, `--ink`, `var(--font-mono)`, `max-block-size: 22rem`, `overflow: auto`,
+   `tabIndex={0}` e `aria-label="Texto do prompt"` (técnica da WCAG 2.1.1 para região rolável).
+   **Nunca fundo escuro, nunca cor de sintaxe** — é papel, não terminal.
+
+**O aviso é prosa: sem caixa, sem ícone, sem `Alert tone="warning"`.** Dois motivos, e os dois são
+duros. Primeiro, o banner amarelo com ícone é precisamente o objeto que as pessoas aprendem a pular —
+transformá-lo em mobília é transformar o consentimento em clique automático. Segundo, `--warning`
+neste produto já tem outro dono semântico (pendência de categorização), e um segundo significado para
+a mesma cor desfaz o primeiro. O peso vem da **tipografia e da posição**: a primeira linha é a mais
+escura da seção e está **acima de qualquer botão** (aceite 50 da spec 0010, com teste que afirma a
+ordem no DOM, não só a presença na tela).
+
+**Por que são três linhas, e não duas** (achado médio do `revisor-seguranca`, 21/09/2026, sobre a
+redação original desta spec). A segunda versão dizia `Não vão no texto: saldos, nomes, e-mails…`, e
+isso é **falso** exatamente para o conteúdo que domina o export. O sanitizador da importação
+(`internal/importer/sanitize`) declara o oposto com todas as letras: sai o que identifica terceiro
+por **documento** — CPF, CNPJ, agência, número de conta —, mas **fica o nome da contraparte**, porque
+é ele que responde "quem eu paguei". O parser do Inter guarda a descrição como
+`Pix enviado - Fulano de Tal` e junta a **mensagem do Pix** — texto que um terceiro escreveu — dentro
+dela; e chave Pix por e-mail ou telefone é comum. Ou seja: nome de pessoa **sai** daqui, e é dado de
+**terceiro**, não só da casa.
+
+Isso pesa mais nesta tela do que pareceria, porque a mitigação **inteira** da única ameaça nova desta
+feature é o consentimento informado — não há controle técnico substituto quando o transporte é a
+pessoa. Um aviso que nega a maior categoria de dado pessoal que de fato sai produz consentimento
+**desinformado**, que é pior do que nenhum aviso: ele compra tranquilidade com uma afirmação falsa.
+Daí o desenho final: a linha 1 dá o peso e a responsabilidade, a **linha 2 diz o que realmente vai**
+(a que faltava) e a linha 3 lista o que fica de fora — e é essa terceira que transforma susto em
+decisão. Regra para quem escrever avisos deste tipo daqui em diante: **a lista do que não sai é
+escrita a partir do código que sanitiza, nunca de memória**, e qualquer mudança no
+`internal/importer/sanitize` ou num parser obriga a reler estas três linhas.
+
+**Um texto, uma fonte.** `Copiar` usa `navigator.clipboard.writeText` do **mesmo** texto exibido, e
+`Baixar` monta um `Blob` do **mesmo** texto com
+`<a download="homefinance-prompt-2026-07-a-2026-09.md">` e `revokeObjectURL` em seguida — nunca uma
+segunda requisição, que poderia devolver outro retrato. Falhando a cópia (contexto inseguro,
+permissão negada, navegador antigo), o `<details>` **abre sozinho** e o `<output>` diz
+`Não consegui copiar. Abra "Ver o texto" e copie à mão.` — e essa mensagem **não** some com o tempo,
+porque pede uma ação.
+
+**Busca do prompt:** `useQuery` com `staleTime: Infinity`, `refetchOnWindowFocus: false` e chave
+**própria** `['ai','prompt',fromMonth,toMonth]` — fora do prefixo `transactions` do ADR-027, e é
+deliberado: esta é a única tela do produto em que **sair do app é o comportamento esperado**, e um
+refetch no retorno trocaria o texto que a pessoa acabou de copiar por outro, com outro `generatedAt`.
+Carregando: botões com `aria-disabled` (**nunca** `disabled` em lugar nenhum desta tela — ele sai da
+navegação por teclado e perde contraste justo quando a pessoa está esperando) e `role="status"` com
+`Montando o prompt de julho a setembro…`. Erro:
+`Alert tone="error" title="Não foi possível montar o prompt."` mais `Tentar de novo`.
+
+### (f) Cor — esta tela não tem dinheiro
+
+Nenhum centavo aparece em `/ia`. Portanto **`--income`, `--expense` e `--chart-*` não entram em lugar
+nenhum** dos arquivos desta feature. Sobram exatamente dois: `--accent` (ação primária, link, anel de
+foco, o "Copiado.") e `--danger` (o `Alert` de erro). Teste de aceite: `filter: grayscale(1)` na tela
+inteira, e **nenhuma informação se perde**.
+
+**Token novo:** `--font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono",
+"Liberation Mono", monospace;` em `tokens.css`, ao lado de `--font-ui`. **Uso restrito** ao `<pre>` do
+prompt e, na fatia seguinte, ao campo de colar o JSON — os dois lugares em que o texto vai inteiro
+para outro programa e a monoespaçada é semântica. Em qualquer outro lugar (rótulo, número, célula de
+tabela) é **erro de revisão**: dinheiro se alinha com `tabular-nums`, não trocando de família.
+
+### (g) A seção Importar — o que a E9b concretizou (21/09/2026)
+
+A fatia **E9b** implementa a seção `2 · Importar o que a IA respondeu` em
+`features/ai/components/SecaoImportar.tsx` (campo, ações, estados, barra e relatório final) e
+`BlocosDaPrevia.tsx` (os três blocos e o `<details>`), com a lógica sem JSX em `features/ai/importacao.ts`
+e o componente base novo `components/TextArea/`. A ordem dentro da seção é a da direção:
+campo de colar → ações → totais → bloco A → bloco B → bloco C → `<details>` → barra de confirmar.
+
+**O que ficou exatamente como a direção pedia:**
+
+- **`TextArea`**, gêmeo do `TextField` sobre o `FieldShell` (mesmo contrato, sem `className`/`style`),
+  `<textarea>` com a mesma `.control` mais `min-block-size: 11rem; resize: vertical;
+  font-family: var(--font-mono); font-size: var(--text-13)`, `spellCheck={false}`,
+  `autoCapitalize="off"`, `autoCorrect="off"`. **É o segundo e último lugar de `--font-mono`.**
+  Rótulo visível `Cole aqui o JSON que a IA respondeu`; dica `Só o JSON — do primeiro { ao último }.
+  Se a IA escreveu texto antes ou depois, apague.`. `Conferir` (primary; vazio → `aria-disabled` e
+  rótulo `Cole o JSON para conferir`, **nunca `disabled`**) e `Limpar` (quiet, só com texto ou prévia).
+- **Totais** num `<p role="status">` (`--text-15`, `--ink`, `tabular-nums`) que carrega também a frase
+  de carregamento (`Conferindo o que a IA respondeu…`), a de prévia vazia (`Nada deste JSON pode ser
+  aplicado.`) e a da regra de frescor — um nó, uma frase por estado. Os números de `skipped`/`rejected`
+  são do servidor; categorias e palavras **descontam o que foi desmarcado** (trade-off assumido: número
+  parado seria mentira; é contagem, não centavo — §10.5 da spec).
+- **Bloco A** (`Categorias a criar · 3`): só `outcome: created`; checkbox nativo marcado por padrão,
+  `aria-label="Criar Alimentação > Padaria com 2 palavras-chave"`; `Desmarcar todas`/`Marcar todas`
+  quiet sm; grupo em `--ink-muted` e folha em `--ink`; `Grupo novo · natureza: despesa` só com
+  `groupIsNew`; palavras como **texto citado** `«padaria» · «panificadora»` (abaixo de 40rem a coluna
+  some e elas viram terceira linha da célula); linha desmarcada em `--ink-muted` por
+  `data-desmarcada`; com ≥ 5 categorias o apoio ganha a frase de "a IA costuma criar demais";
+  `merged_into_existing` vai para o bloco C com a nota `já existia — as palavras vão para ela`.
+- **Bloco B**: `DataTable` agrupada por conta (`RowGroup label="Nubank · 3"`, na ordem do JSON),
+  **uma linha por palavra** com o número de `impact.byKeyword` (`«nu pagamentos»` · `87 de 212`,
+  `tabular-nums`, `end`, `sr-only` completando "lançamentos do período"), **impacto decrescente dentro
+  de cada conta**, limiar `>= 10` **e** `>= 10%` de `totals.periodTransactions` (comparado em inteiros,
+  `candidatos × 10 >= universo`) **por linha** — é a palavra genérica que salta, não a conta —, e
+  quando dispara: `data-atencao="true"` na linha, `box-shadow: inset 2px 0 0 var(--warning)` na primeira
+  célula, `AlertIcon size={14}` em `--warning-ink`, o número em peso 600 e a frase em `--ink` citando a
+  palavra: `Palavra genérica: «pagamento» casa com 87 dos 212 lançamentos do período. Para deixá-la de
+  fora, apague-a do JSON e confira de novo.` **Único lugar de `--warning` na seção.** Nada desmarcável
+  — a saída é a frase. O total do item (`impact.transferCandidates`, a união) **não aparece**: com uma
+  palavra repete a linha, com várias é um segundo número que não aponta o problema, e a ação é sempre
+  sobre uma palavra. Janela sem lançamento (`periodTransactions: 0`) escreve `sem lançamentos no
+  período` no lugar de um `0 de 0` verdadeiro e mudo.
+- **Bloco C** é `<dl>` (`dt` com o caminho, `dd` com as palavras citadas), no estilo de
+  `ImportResultScreen.module.css`; empilha abaixo de 40rem.
+- **`<details>` fechado** `Ver o que não entra · N`, dois `RowGroup` (`Já estavam lá · 6` e
+  `Recusadas · 3`, cada um com o apoio da direção), colunas `Palavra` · `Item` · `Motivo`, **nenhum
+  controle**. O motivo vem de três `Record` exaustivos em `importacao.ts` (`MOTIVO_DA_RECUSA`,
+  `MOTIVO_DO_PULO`, `MOTIVO_DO_DESFECHO`) — motivo novo no contrato é erro de compilação. Para
+  `keyword_taken`, `já está em {dono}` resolve o `ownerId` contra `/categories` e `/accounts` já
+  carregados (`includeArchived=true`, só pedidos quando existe prévia); sem nome, `já está em outra
+  categoria`/`outra conta` — nunca texto do JSON.
+- **Barra de confirmar** grudada (`position: sticky`, borda, sem sombra), com `<output aria-live="polite">`
+  (`Inclui 2 grupos novos.`, grupo contado **uma** vez mesmo com duas folhas) e o primary cujo rótulo diz a
+  saída e recalcula: `Criar 3 categorias e gravar 18 palavras` · `Gravar 18 palavras` · `Criar 2
+  categorias` · `Nada para aplicar` + `aria-disabled`. Confirmar manda o **mesmo `payload`** da prévia
+  mais `skipNewCategories` = os `ref` das desmarcadas, vindos do relatório.
+- **Estados**: vazio sem `EmptyState`; carregando com a frase no status e **uma** `DataTable loading`
+  com as colunas do bloco A; JSON inválido/400/413/429 **no campo** (`TextArea error`) com o foco de
+  volta ao `<textarea>`, copy por código; rede/500 em `Alert tone="error"` com `Tentar de novo`;
+  409 no confirm em `Alert` (`O estado mudou desde a conferência.`) com `Conferir de novo`; sucesso
+  vira o relatório do que **de fato** entrou — `<dl>` com `Categorias criadas` · `Palavras gravadas` ·
+  `Já estavam lá` · `Recusadas` · `Desmarcadas por você` (zeros não renderizam), frase `role="status"`
+  com os números do **confirm**, `Ir para Reprocessar` (foca o `<h2>` da seção 3, `tabIndex={-1}`,
+  sem `scrollTo` nem `smooth`) e `Importar outro JSON`. **Sem toast.**
+- **Regra de frescor, agora com objeto**: trocar o mês da casca ou o tamanho da janela descarta a
+  prévia (o JSON colado fica) e publica `A janela mudou — confira de novo para medir o impacto no novo
+  período.`. A seção **não** recebe `key` do pai (a remontagem levaria o texto junto): ela compara a
+  chave da janela em que a prévia foi medida com a atual durante a renderização.
+- **Cor**: `--accent`, `--warning`/`--warning-ink` (um lugar) e `--danger` (erro). Zero `--income`,
+  `--expense`, `--chart-*`. Validado com `filter: grayscale(1)` em navegador real: a linha de atenção
+  continua dita pelo filete (cinza), pelo ícone, pela frase e pelo peso do número.
+
+**O que divergiu da direção, e por quê:**
+
+1. **Bloco B: nada divergiu — mas quase.** A primeira versão do contrato media `impact` só por
+   **item** (`transferCandidates` do item inteiro), e com esse contrato a tela nasceu por entrada de
+   conta, numa tabela plana com coluna `Conta` — a tela não inventa uma medição por palavra que o
+   servidor não fez, nem reparte o JSON em uma entrada por palavra (o confirm precisa ser o **mesmo**
+   payload). No mesmo dia **o contrato se corrigiu**: `KeywordImportImpact` ganhou `byKeyword` (uma
+   entrada por palavra de `added`, na mesma ordem; o total do item é a união e a soma pode passar dele),
+   e o bloco voltou ao desenho original — grupo por conta, linha por palavra, atenção por linha. Fica
+   registrado como lição: quando a direção e o contrato divergem, a divergência é do **contrato**, e é
+   ele que muda.
+2. **A tabela de copy dos motivos não existia** no bloco desta spec (a direção citava uma "§10" deste
+   bloco que nunca foi escrita); as frases nasceram das §§4.2–4.3 da spec e das descrições do contrato,
+   e moram em `importacao.ts`. Este bloco passa a ser a referência: `item_not_found` → `não existe nesta
+   casa` · `item_archived` → `está arquivada — desarquive para receber palavras` · `name_mismatch` → `o
+   nome que veio no JSON não é o deste item` · `group_has_children` → `é um grupo com subcategorias — a
+   palavra vai numa subcategoria` · `invalid_keyword` → `fora do formato de palavra-chave` ·
+   `keyword_taken` → `já está em {dono}` · `ambiguous_in_payload` → `aparece em dois itens no mesmo
+   JSON` · `limit_exceeded` → `passaria de 20 palavras` · `already_present` → `já estava lá`; desfechos
+   de categoria nova: `invalid_name` → `nome fora do formato (1 a 60 caracteres, sem >)` ·
+   `kind_required` → `grupo novo sem natureza` · `invalid_kind` → `natureza fora do conjunto (despesa,
+   receita, investimento, resgate)` · `kind_mismatch` → `natureza diferente da do grupo` ·
+   `name_taken_archived` → `existe arquivada com este nome — desarquive em Categorias` ·
+   `household_limit` → `passaria do teto de 200 categorias` · `duplicate_in_payload` → `repetida no
+   mesmo JSON — a primeira vale`. Uma categoria nova recusada vira uma linha própria (`Palavra` = o
+   caminho, `Item` = `categoria nova`).
+3. **O 422 em `fields.toMonth`** (acrescentado ao contrato das duas rotas depois da direção: a janela
+   tem descrições demais para a medição, tudo ou nada) ganhou um terceiro lugar de erro — nem no campo
+   (o texto não tem culpa) nem com `Tentar de novo` (daria o mesmo 422): `Alert tone="error"` **sem
+   ação**, `A janela é grande demais para conferir.` / `…para aplicar.`, com a frase `Escolha um
+   período menor no alto da página e confira de novo.` — e o aviso some sozinho quando a janela muda,
+   porque a ação era essa.
+4. **Abaixo de 40rem** duas colunas somem e o dado reaparece na célula ao lado (o mesmo mecanismo da
+   revisão da importação): no bloco B a coluna do impacto vira a linha `87 de 212 candidatos a
+   transferência` sob a palavra, para a frase de atenção ter a largura da moldura; no `<details>` a
+   coluna `Item` vira a linha sob a palavra. Medido a 375px: sem isso a frase de atenção virava uma
+   torre de duas palavras por linha.
+5. **A barra de confirmar fica acima da barra de navegação do celular** (`inset-block-end:
+   var(--nav-bar-h)`, como o `Toast`), e não em `0` como a da revisão da importação — em `0` a barra
+   fixa do celular a cobriria.
+6. **O esqueleto de carregamento anuncia duas vezes**: o `role="status"` dos totais diz `Conferindo…`
+   e a `DataTable loading` traz o próprio `Carregando categorias a criar` (`sr-only`). É o
+   comportamento do componente base, mantido de propósito; trocar isso é decisão do `DataTable`, não
+   desta tela.
+7. **Sobre o exemplo "24 de 212 não dispara"** do pedido de testes: 24 de 212 são 11,3% — pela regra
+   normativa (`>= 10` e `>= 10%`, §10.1 da spec e contrato) **dispara**, e o teste afirma isso. O caso
+   "nubank legítimo que não grita" é coberto como 24 de 500 (4,8%); as fronteiras testadas são 22 de
+   212 (dispara) e 21 de 212 (não), mais 10 de 212 (não, pela proporção) e 9 de 20 (não, pelo piso).
+   A regra venceu o exemplo, e o exemplo estava errado por aritmética.
+8. **Chaves por índice, nunca por `id`.** O contrato devolve `KeywordImportItem.id` como `""` quando o
+   id do JSON não tinha forma de uuid (a entrada vem `item_not_found`), então duas entradas assim
+   colidiriam numa `key` por id; os blocos B e C e o `<details>` chaveiam pela posição no relatório,
+   que é a mesma do payload. E `KeywordImportRejectedKeyword.keyword` é texto livre (neutralizado e
+   truncado em 40 pelo servidor — em `invalid_keyword` vem a forma bruta): entra na tela só como texto
+   citado, que o React escapa.
+
+9. **O teto de 128 KiB é conferido no cliente, em bytes UTF-8, antes de qualquer pedido** (achado B2
+   do `qa-testes`, 21/09/2026). Direto na API um corpo maior é 413; pelo proxy do Vite chega **502**
+   (`ECONNRESET`: o servidor responde e fecha sem drenar o corpo), e um reverse proxy em produção tende
+   a fazer o mesmo — e 502 cairia em "Tentar de novo" para sempre. `lerJsonColado` mede o texto colado
+   com `TextEncoder` (nunca `length`, que conta UTF-16 e mente em qualquer acento) contra o mesmo
+   `MAX_BYTES_DO_JSON = 131.072` de `aiimport.MaxPayloadBytes`; e os dois envios medem o **envelope
+   inteiro** (`corpoCabe`), porque no confirm os `ref` de `skipNewCategories` somam ao corpo e uma prévia
+   que coube pode virar um confirm que não cabe. Estourou: o erro mora no campo, com a frase do 413, e
+   nenhuma requisição sai. O 413 continua mapeado (defesa em profundidade); 502/503/504 ganharam a frase
+   `O servidor recusou o envio antes de ler tudo — o JSON pode estar grande demais, ou a API está fora
+   do ar.` na seção, com "Tentar de novo" (que é a ação certa quando a API só caiu).
+
+**Validado contra a pilha real (21/09/2026)** com um E2E temporário (API Go + SQLite + Vite, casa do
+projeto `setup`, JSON de verdade com duas categorias novas num grupo novo, uma folha da semente e uma
+conta criada na hora): prévia `2 categorias novas · 6 palavras entram.`; bloco B `IA QA Inter · 2` com
+`«pix»` e `«ia qa inter»`; desmarcar uma categoria levou o botão de `Criar 2 categorias e gravar 6
+palavras` a `Criar 1 categoria e gravar 5 palavras`; o confirm devolveu `1 categoria criada e 5
+palavras gravadas.` e o banco confirmou — grupo sem palavra, folha com as duas, a desmarcada
+inexistente, a conta com as suas; reimportar o mesmo JSON deu `1 categoria nova · 1 palavra entra · 5
+já estavam lá.`; e os três 400 do servidor (campo desconhecido, sem versão, listas vazias) caíram cada
+um na sua frase, no campo. O que a validação mostrou e virou ajuste: a casa de teste não tinha
+lançamento na janela e o bloco B dizia `0 de 0` — daí a frase `sem lançamentos no período`.
+
+### (h) A seção Reprocessar — o que a E9c concretizou (21/09/2026)
+
+A fatia **E9c** implementa a seção `3 · Reprocessar` em `features/ai/components/SecaoReprocessar.tsx`,
+com a lógica sem JSX em `features/ai/reprocessamento.ts` e as duas chamadas em
+`features/ai/api/reprocessamento.ts`. **Não há backend novo**: a seção orquestra `POST /transfers/detect`
+e `POST /transactions/auto-categorize`, que já existiam com prévia, transação, auditoria, rate limit e
+409 próprios (spec 0010 §5). As chamadas são declaradas nesta feature — import entre features é
+proibido — e conferem o **eco do mês** da resposta (as três condições do `EchoMismatchError`, ADR-030,
+valem: `month` é `required` na resposta, a linha da tabela afirma o mês, e "1 par" de agosto na linha de
+julho seria um registro falso do que foi gravado).
+
+**A ordem — refinamento da §5.2, e o motivo.** A §5.1 fixa *transferências → categorização*, porque
+converter um par zera o `categoryId` das duas pernas (ADR-028). A §5.2 diz "mês a mês, cada mês na
+ordem" — lido ao pé da letra, detectar julho, categorizar julho, detectar agosto… Mas a detecção
+procura o espelho a **±3 dias**, e três dias cruzam a fronteira do mês: categorizada julho, a detecção
+de agosto pode fechar um par com uma perna em 31/07 e zerar a categoria de julho **depois** de ela ter
+sido reportada como gravada. O resultado final estaria certo; o relatório de julho, não. A seção roda
+em **duas fases, cada uma mês a mês**: fase 1 = `detect` em todos os meses da janela; fase 2 =
+`auto-categorize` em todos. É a leitura fiel ao princípio da §5.1 — nenhuma categorização acontece
+antes de **toda** conversão — e elimina a borda. A frase da ordem na tela diz isso:
+`Primeiro as transferências, em todos os meses; depois a categorização. Converter um par apaga a
+categoria das duas pernas — categorizar antes seria trabalho perdido.` (`planoDeExecucao`, com teste
+que afirma a sequência).
+
+**O que ficou exatamente como a direção pedia:**
+
+- **Ocioso:** apoio `Palavra-chave nova não mexe sozinha no que já está gravado. Aqui ela passa a
+  valer.`; a frase dos meses (`Julho, agosto e setembro.`, por `enumerarMeses` sobre `janelaDeTrabalho` —
+  nenhuma seção recalcula data); a frase da ordem; `Button variant="secondary"` **`Conferir`**.
+- **Conferindo:** `role="status"` `Conferindo julho, agosto e setembro…` + `DataTable loading` com as
+  colunas da prévia. Seis chamadas com `dryRun: true`, **em paralelo** (as de um mês e as das duas
+  fases): `dryRun` não escreve, então nem a ordem entre fases nem entre meses importa aqui. Uma falha
+  derruba a prévia inteira — um consolidado de cinco sextos mentiria.
+- **Prévia pronta:** frase consolidada `3 pares de transferência · 42 lançamentos categorizados · 12
+  seguem sem categoria.` — **somada no cliente**, legítimo porque são contagens de linhas e não
+  centavos (ADR-036(e)); `DataTable` por mês com `Mês` · `Pares` · `Categorizados` · `Sem categoria`
+  (`end`, `tabular-nums`; o mês por extenso **com o ano** — `Novembro de 2025` — porque a janela
+  atravessa a virada); `<details>` fechado `Ver os N lançamentos sem par e o motivo` com a copy do
+  `DetectTransfersDialog` (`sem a outra perna gravada` e a explicação, uma vez, acima da lista),
+  agrupado por mês, linha de corte no teto de 500; `Button variant="primary"` **`Reprocessar julho,
+  agosto e setembro`** + `Conferir de novo` (quiet). Zero em tudo: `Nada a reprocessar — não há par
+  para reconhecer nem lançamento sem categoria.` e o botão `Nada a reprocessar` com `aria-disabled`
+  (**nunca `disabled`**; o clique morre no guarda).
+- **Executando:** a tabela vira `Mês` · `Transferências` · `Categorização`, **uma célula por etapa,
+  estado por palavra** (`na fila` · `em andamento…` · `feito`), tinta e peso só como reforço.
+  Progresso num `<output aria-live="polite">` que nasce **vazio** no instante em que a execução começa
+  e recebe **uma frase curta por chamada concluída** (`Julho: 1 par.` / `Julho: 12 categorizados.`),
+  cada uma uma ADIÇÃO — que é o que o leitor de tela anuncia — e que fica na tela como rastro.
+  Estritamente sequencial, `await` a `await`, `dryRun: false`, fase 1 inteira antes da fase 2, **para
+  no primeiro erro**.
+- **409 no meio — para tudo.** Nenhuma chamada depois do conflito (teste conta as chamadas). `Alert
+  tone="error" title="O estado mudou no meio do reprocessamento."`, corpo montado por `fraseDoQueFicou`
+  mês a mês e etapa a etapa: `As transferências de julho, agosto e setembro foram aplicadas e continuam
+  aplicadas. A categorização de julho também. A de agosto não foi, e a de setembro não chegou a rodar.
+  Confira de novo antes de seguir.` — mais a linha `Na prévia nova, o que já foi aplicado volta com 0 —
+  é a prova de que está feito.`, porque esse 0 é idempotência (§5.6), não falha. Ação única: `Conferir
+  de novo`. A tabela permanece como registro: `feito` / `não aplicado` / `não chegou a rodar`. Nenhum
+  `Reprocessar`, nenhum `Tentar de novo` — repetir sobre uma prévia velha seria gravar às cegas.
+- **Outros erros:** mesma parada. 429 → `O reprocessamento parou.` + `Muitas operações seguidas. Espere
+  um minuto e confira de novo.`; 422 em `fields.month` → `Um dos meses tem lançamentos demais para
+  reprocessar de uma vez. Escolha um período menor no alto da página e confira de novo.`; rede/500 →
+  a frase única do app. Na prévia, `Não foi possível conferir.` com `Tentar de novo` — **exceto** 429 e
+  422, cuja ação não é repetir (esperar; encurtar a janela).
+- **Sucesso:** `<dl>` do total **das respostas de execução** (nunca da prévia; zeros não renderizam),
+  `TextLink` `Ver as transferências` (`/transferencias?mes=`) e `Ver os lançamentos`
+  (`/lancamentos?mes=`) no **último** mês da janela, e `Conferir de novo`. A frase final
+  (`Reprocessado — 3 pares de transferência e 40 lançamentos categorizados.`) entra no mesmo
+  `<output>` para ser **anunciada**, mas fica `sr-only` quando o `<dl>` já diz os números — um
+  resultado dito uma vez na tela. **Sem toast.** Idempotente: execução que devolve 0 e 0 diz, visível,
+  `Nada mudou — não havia par para reconhecer nem lançamento sem categoria.`, sem `<dl>`.
+- **Regra de frescor:** o mesmo mecanismo e a **mesma frase** da seção 2 (`FRASE_JANELA_MUDOU`, agora
+  em `features/ai/secoes.ts`, importada pelas duas): comparação de chave durante a renderização, sem
+  `key` no pai. Trocar o mês ou o tamanho da janela descarta a prévia e o resultado.
+- **Cor:** só `--accent` e `--danger`. Zero `--income`/`--expense`/`--chart-*`. Nenhum `disabled` na
+  seção. O `<h2>` tem `id="ia-secao-reprocessar"`, `tabIndex={-1}` e anel de foco só em
+  `:focus-visible` — é onde "Ir para Reprocessar" chega. Nenhuma animação nova: o único movimento é
+  o `Spinner` do botão, que já respeita `prefers-reduced-motion`.
+- **Ao terminar** (sucesso ou parada), a seção invalida `transfers`, `transactions` e `accounts` — o que
+  foi aplicado ficou aplicado. O prompt da seção 1 **não** é invalidado: ele é um retrato, e
+  reescrevê-lo pelas costas de quem copia é o que a E9a proibiu.
+
+**O que divergiu da direção, e por quê:**
+
+1. **As ações fecham a seção.** A revisão em navegador real mostrou o `Reprocessar` acima da frase
+   consolidada e da tabela, lendo como cabeçalho; ele é o **próximo passo** depois de ler os números,
+   então a linha de ações (`Reprocessar…` + `Conferir de novo`, ou só `Conferir`) é o último bloco da
+   seção em todos os estados. Na parada não há linha de ações: a única saída é o `Conferir de novo` do
+   próprio aviso.
+2. **A tabela de execução ganhou o mês na primeira coluna, e o estado nas duas seguintes** — não "a
+   coluna Mês vira estado". Uma célula por etapa exige que o mês continue nomeado ao lado, senão a
+   linha `feito · não aplicado` não diz de quem é. É o desenho literal de "uma célula por etapa".
+3. **O `<output>` acumula, em vez de trocar a frase.** A direção dizia "uma frase curta por chamada
+   concluída"; cada frase é adicionada como nó novo, então o leitor de tela anuncia exatamente uma
+   por chamada (o padrão de `aria-live` sem `aria-atomic` anuncia adições), e quem enxerga fica com o
+   rastro — que é o registro que a parada no meio precisa deixar. A frase final entra no mesmo
+   `<output>`: nenhuma segunda live region muda ao mesmo tempo.
+4. **Um estado a mais, `sem resposta`.** `não aplicado` só é verdade quando o servidor **respondeu**
+   com erro (as duas rotas são uma transação; erro é rollback). Rede caída no meio não diz nada: o
+   pedido pode ter chegado e sido gravado. Afirmar "não aplicado" seria chutar, então a célula e a
+   frase dizem `ficou sem resposta`, e a prévia nova resolve a dúvida (o 0 de idempotência).
+5. **Uma nota abaixo da tabela quando pares e categorizados são ambos > 0:** `A categorização foi
+   medida antes das transferências: uma perna de par que também bateria com uma palavra-chave de
+   categoria vira transferência e não é categorizada. O total real é o da execução.` As duas prévias
+   são medidas sobre o mesmo estado e podem se sobrepor numa perna (aceite 39); sem a nota, "42" na
+   prévia e "40" na execução pareceriam erro. Só aparece quando a sobreposição é possível.
+6. **A lista dos sem par não mostra valor.** A premissa da tela (f) — `Nenhum centavo aparece em /ia`
+   — continua verdadeira: data, `saiu de Nubank`/`entrou em Inter` e descrição dizem qual extrato falta
+   importar, que é a única ação possível aqui; o valor mora no diálogo de `/transferencias`.
+7. **Execução em curso e execução parada não são descartadas pela regra de frescor.** A primeira está
+   gravando (abandonar o estado não cancela as transações no servidor); a segunda é o registro de uma
+   aplicação pela metade que a pessoa precisa ler antes de seguir — sumir com ele esconderia o
+   problema. Prévia e resultado concluído continuam sendo descartados, como a regra manda.
+8. **`Conferir de novo` existe também na prévia e no sucesso**, e não só no 409: quem importou
+   palavras depois de conferir precisa medir de novo sem trocar a janela ida e volta.
+9. **A prévia-frase de "nada a reprocessar" é honesta sobre os que seguem sem categoria:** com 12
+   lançamentos sem categoria que nenhuma palavra alcança, ela diz `…e nenhuma palavra-chave bate com
+   os 12 lançamentos sem categoria.` em vez de negar que existem.
+
+### Checklist anti-cara-de-IA — spec 0010 (aplicar com a tela pronta)
+
+1. A barra inferior continua com **sete** células, e os rótulos continuam visíveis a 360, 375, 390 e
+   393 px. Nenhum item novo entrou nela.
+2. O ícone é o `PromptIcon` deste projeto: sem robô, sem varinha, sem faísca, sem cérebro, sem balão
+   de fala, sem emoji e sem biblioteca de ícones.
+3. O aviso é **prosa acima dos botões** — sem caixa amarela, sem ícone de alerta, sem `--warning`.
+   E são **três** linhas: a segunda diz que o nome de quem pagou ou recebeu e a mensagem do Pix vão
+   junto. Um aviso que diga "não vão nomes" é defeito de segurança, não de texto.
+4. As estatísticas são **uma linha de texto**. Nenhum cartão com número gigante, nenhuma barra de
+   progresso, nenhum medidor, nenhum ícone ao lado de contagem.
+5. Os números das seções são **texto no `<h2>`**. Nenhuma bolinha numerada, nenhuma linha ligando
+   passos, nenhum `ImportStepper`.
+6. O `<pre>` é **papel**: fundo `--surface-sunken`, tinta `--ink`, zero cor de sintaxe, zero tema
+   escuro de editor, zero numeração de linha na margem.
+7. `grayscale(1)` não muda nada: `--income`, `--expense` e `--chart-*` não aparecem nos CSS desta
+   feature.
+8. `--font-mono` aparece **só** no `<pre>` do prompt e no `<textarea>` de colar o JSON (E9b) — os dois
+   lugares em que o texto vai inteiro para outro programa. Em mais nenhum.
+9. Nenhum `disabled` na tela inteira — o estado indisponível é `aria-disabled`, com o clique barrado
+   no guarda da função.
+10. Nenhuma seção promete botão que não funciona: as que ainda não existem dizem `Ainda não está no
+    ar.` e não têm controle nenhum.
+11. Nenhuma sombra: as três seções e a faixa se separam por borda de 1px, como todo o resto.
+12. Copy em pt-BR, sentença normal, sem exclamação e sem emoji. Palavras proibidas nesta tela:
+    "mágica", "inteligente", "poderoso", "insights", "com IA" como adjetivo de funcionalidade, e
+    qualquer promessa de que o app "analisa" ou "entende" os lançamentos — ele monta um texto.
+13. Um pedido de rede monta a seção Exportar, e ele não é refeito ao voltar para a aba.
+14. Zero medida, cor ou raio fora dos tokens em `AiScreen.module.css`, `SecaoExportar.module.css`,
+    `SecaoImportar.module.css`, `BlocosDaPrevia.module.css` e `TextArea.module.css`.
+15. **(E9b)** As palavras-chave da prévia são **texto citado** (`«padaria» · «panificadora»`), nunca
+    fichas: ficha é a linguagem de editar, e na prévia nada se edita.
+16. **(E9b)** O impacto é **número como texto** (`87 de 212`); nenhuma barra de risco, anel, semáforo
+    ou "score". `--warning` aparece em **um** lugar — o filete e o ícone da linha de atenção — e em
+    `grayscale(1)` a linha continua dita pela frase e pelo peso do número.
+17. **(E9b)** O erro do JSON mora **no campo** (`TextArea error`, foco de volta ao `<textarea>`) — nunca
+    toast, nunca `Alert` no topo, nunca eco do texto colado, nunca `notes` renderizado.
+18. **(E9b)** Checkbox **nativo** no bloco A, nunca `role="checkbox"`; `<details>` do que fica de fora
+    **sem nenhum controle**, nem desabilitado; o `<dl>` do bloco C não é tabela.
+19. **(E9b)** O sucesso é o **relatório na própria seção**, com os números do confirm — sem toast, sem
+    ilustração, sem "pronto!".

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, NetworkError } from '@/api/client'
+import { ApiError, EchoMismatchError, NetworkError } from '@/api/client'
 import {
   isCategoriaRecusada,
   isConflict,
@@ -39,6 +39,16 @@ describe('messageForError', () => {
 
   it('nunca repassa texto cru: erro desconhecido cai na mensagem genérica', () => {
     expect(messageForError(new Error('database password is hunter2'))).toBe(
+      'Algo falhou do nosso lado. Tente de novo em instantes.',
+    )
+  })
+
+  /** Eco divergente NÃO ganha copy própria: a frase genérica é a verdade —
+   *  não há dado que o usuário possa corrigir, e uma frase nova seria uma
+   *  segunda superfície de erro para a mesma classe de problema. Este teste é
+   *  o que mantém a promessa: se alguém der redação própria ao eco, ele cai. */
+  it('eco divergente cai na mensagem genérica, sem copy própria', () => {
+    expect(messageForError(new EchoMismatchError())).toBe(
       'Algo falhou do nosso lado. Tente de novo em instantes.',
     )
   })

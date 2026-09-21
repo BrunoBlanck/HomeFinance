@@ -6,6 +6,7 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router'
 import { AccountsScreen } from '@/features/accounts/screens/AccountsScreen'
+import { AiScreen } from '@/features/ai/screens/AiScreen'
 import { ConfirmEmailScreen } from '@/features/auth/screens/ConfirmEmailScreen'
 import { ForgotPasswordScreen } from '@/features/auth/screens/ForgotPasswordScreen'
 import { LoginScreen } from '@/features/auth/screens/LoginScreen'
@@ -134,6 +135,19 @@ const importResultRoute = createRoute({
   component: ImportResultScreen,
 })
 
+/** Menu IA (spec 0010). A tela tem TRÊS seções — exportar o prompt, importar o
+ *  que a IA respondeu e reprocessar — e uma janela de trabalho só, publicada na
+ *  busca: `mes` (da casca) + `meses` (1 a 3, padrão 3, só aqui).
+ *
+ *  Uma rota só, e não uma por seção: o fluxo **não é linear** (dá para importar
+ *  sem ter exportado nesta sessão) e as três compartilham a mesma janela. Um
+ *  passo por rota, como na importação, prometeria uma ordem que não existe. */
+const aiRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/ia',
+  component: AiScreen,
+})
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/entrar',
@@ -173,6 +187,7 @@ const routeTree = rootRoute.addChildren([
     transfersRoute,
     investmentsRoute,
     categoryReportRoute,
+    aiRoute,
     importRoute,
     importReviewRoute,
     importResultRoute,

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/brunorblanck/homefinance/backend/internal/account"
+	"github.com/brunorblanck/homefinance/backend/internal/aiimport"
 	"github.com/brunorblanck/homefinance/backend/internal/audit"
 	"github.com/brunorblanck/homefinance/backend/internal/cardstatement"
 	"github.com/brunorblanck/homefinance/backend/internal/category"
@@ -28,6 +29,7 @@ var (
 	_ cardstatement.Auditor = cardStatementAuditBridge{}
 	_ importer.Auditor      = importAuditBridge{}
 	_ investment.Auditor    = investmentAuditBridge{}
+	_ aiimport.Auditor      = aiImportAuditBridge{}
 )
 
 // Record grava o evento de conta.
@@ -128,6 +130,25 @@ func (b cardStatementAuditBridge) Record(ctx context.Context, p cardstatement.Au
 type importAuditBridge struct{ svc *audit.Service }
 
 func (b importAuditBridge) Record(ctx context.Context, p importer.AuditParams) error {
+	return b.svc.Record(ctx, audit.Params{
+		Action:      p.Action,
+		Entity:      p.Entity,
+		EntityID:    p.EntityID,
+		UserID:      p.UserID,
+		HouseholdID: p.HouseholdID,
+		IP:          p.IP,
+	})
+}
+
+// aiImportAuditBridge registra UMA execução real de
+// POST /ai/keyword-import/confirm (spec 0010, achado A8 da emenda §10): a
+// entidade é a CASA e o id é o household_id. É o registro de ORIGEM das
+// `category.created`, `category.updated` e `account.updated` que os serviços
+// de categoria e de conta gravam na mesma transação — nenhuma delas sabe
+// dizer que veio do import de IA. As palavras nunca entram no log.
+type aiImportAuditBridge struct{ svc *audit.Service }
+
+func (b aiImportAuditBridge) Record(ctx context.Context, p aiimport.AuditParams) error {
 	return b.svc.Record(ctx, audit.Params{
 		Action:      p.Action,
 		Entity:      p.Entity,

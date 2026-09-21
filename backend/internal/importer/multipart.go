@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/brunorblanck/homefinance/backend/internal/id"
 	"github.com/brunorblanck/homefinance/backend/internal/importer/archive"
 )
 
@@ -180,7 +181,18 @@ func ReadUploadForm(r *http.Request) (*UploadForm, error) {
 		form.Zero()
 		return nil, &FormFieldError{Field: PartFile, Msg: "Escolha um arquivo .csv ou .zip."}
 	}
-	if form.AccountID == "" {
+	// A FORMA do id de conta é conferida aqui, na borda, antes de o valor
+	// chegar ao serviço e virar `WHERE id = ?`.
+	//
+	// Vazio e malformado recebem a MESMA mensagem, e ela não ecoa o que veio:
+	// a recusa diz a ação ("escolha a conta"), nunca o valor recusado nem o
+	// motivo técnico (S8). Recusar a forma é o que fecha a porta do id com
+	// espaço à direita, com controle, com aspas ou maior que a coluna — no
+	// MSSQL, `WHERE id = ?` ignora o espaço à direita por padding ANSI, e o
+	// id do cliente passaria pela conferência de posse levando o espaço
+	// consigo. O que a forma NÃO fecha (caixa trocada, que é forma canônica
+	// válida) é fechado pela canonização em Analyze, que grava `conta.ID`.
+	if !id.IsCanonical(form.AccountID) {
 		form.Zero()
 		return nil, &FormFieldError{Field: PartAccountID, Msg: "Escolha a conta de destino."}
 	}

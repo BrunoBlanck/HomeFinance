@@ -98,6 +98,16 @@
     }
   }
 
+  /* O grupo "ferramentas" da lateral: um filete separa o que a pessoa usa todo
+     dia (movimento e cadastro) do que ela usa de vez em quando. É borda de 1px
+     no <li>, como toda separação de superfície deste projeto — nem título de
+     grupo em caixa alta, nem fundo tingido. */
+  .navFerramenta {
+    margin-block-start: var(--space-2);
+    padding-block-start: var(--space-2);
+    border-block-start: 1px solid var(--border);
+  }
+
   .main {
     min-inline-size: 0;
     padding: var(--space-5) var(--space-5) var(--space-8);
@@ -167,6 +177,19 @@
       grid-auto-flow: column;
       grid-auto-columns: minmax(0, 1fr);
       gap: 2px;
+    }
+
+    /* **Ferramenta não ocupa célula da barra** (docs/DESIGN.md, spec 0010).
+       A célula mede `(viewport − 16 − (N − 1) × 2) / N` e o rótulo precisa de
+       47px ("Transfe-" a --text-12). Com N = 8 a 393px ela cai a 45,4px, e o
+       piso só-ícone passaria a valer em 390px de content box: os rótulos de
+       TODA a navegação apagariam em 360, 375, 390, 393 e 412px de viewport —
+       praticamente todo celular em pé. Um item novo não cobra esse preço dos
+       sete que já estavam lá; ele vai para o menu do usuário, que não tem
+       limite de largura. `display: none` retira o <li> da grade, então a barra
+       continua com SETE colunas, e o filete não aparece aqui. */
+    .navFerramenta {
+      display: none;
     }
 
     .navItem {

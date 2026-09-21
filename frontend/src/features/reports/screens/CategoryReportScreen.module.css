@@ -103,6 +103,67 @@
     color: var(--ink);
   }
 
+  /* O disclosure do grupo: botão de verdade, com cara de texto. A seta é o
+     único sinal de estado além do `aria-expanded` — e ela gira, em vez de
+     trocar de ícone, para que o estado seja legível também de relance. */
+  .abrirGrupo {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-inline-size: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: start;
+    cursor: pointer;
+
+    /* Alvo de toque: a linha é densa, e o nome sozinho seria um alvo de 16 px
+       de altura. O pseudo-elemento cresce a área clicável sem esticar a
+       linha. */
+    position: relative;
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset-block: -6px;
+      inset-inline: -4px;
+    }
+
+    &:hover .grupo {
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+      border-radius: var(--radius-sm);
+    }
+  }
+
+  .seta {
+    display: inline-flex;
+    flex: none;
+    color: var(--ink-muted);
+    transform: rotate(-90deg);
+    transition: transform 120ms ease;
+
+    &[data-aberto] {
+      transform: rotate(0deg);
+    }
+  }
+
+  /* O atalho da subcategoria fica na mesma linha do nome, atrás do `·` —
+     mesma gramática da ação do grupo. */
+  .acaoDaFilha {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-inline-start: var(--space-2);
+  }
+
   /* Recuo da subcategoria: alinha o nome com o do grupo, depois dos 12 px da
      amostra e dos 8 px de intervalo. */
   .filha {
@@ -178,6 +239,13 @@
       display: none;
     }
 
+    /* Na coluna estreita a ação da filha também desce para a própria linha. */
+    .acaoDaFilha {
+      display: flex;
+      margin-inline-start: 0;
+      min-block-size: 1.5rem;
+    }
+
     .faixa {
       align-items: stretch;
       flex-direction: column;
@@ -189,7 +257,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .quadro {
+    .quadro,
+    .seta {
       transition: none;
     }
   }

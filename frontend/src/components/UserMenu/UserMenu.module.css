@@ -96,7 +96,41 @@
     border-radius: var(--radius-sm);
     font-size: var(--text-15);
     color: var(--ink);
+    text-decoration: none;
     text-align: start;
+  }
+
+  /* O destino que só existe aqui quando a barra inferior não tem célula para
+     ele (docs/DESIGN.md, spec 0010 §10.6). Acima de 52rem o item vive na
+     lateral, e repeti-lo aqui daria duas portas — e duas marcas de
+     `aria-current="page"` — para a mesma tela.
+     Sintaxe clássica de media query, e não a de intervalo: o jsdom descarta a
+     folha INTEIRA ao encontrar a de intervalo, e o teste passaria a rodar sem
+     estilo nenhum (a mesma nota do AppShell.module.css). */
+  .soNoCelular {
+    display: none;
+  }
+
+  @media (max-width: 52rem) {
+    .soNoCelular {
+      display: flex;
+    }
+
+    hr.soNoCelular {
+      display: block;
+    }
+  }
+
+  /* A seção corrente é marcada por PESO e por fundo, nunca só por cor. */
+  .item[aria-current="page"] {
+    background-color: color-mix(in oklch, var(--accent), transparent 88%);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .item:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-offset) * -1);
   }
 
   /* O rádio nativo continua no DOM e focável; o desenho é do rótulo. */

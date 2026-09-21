@@ -135,7 +135,7 @@ Todos os valores são lidos **exclusivamente** por `internal/platform/config`. `
 | Variável | Padrão | Obrigatória | Descrição |
 |---|---|---|---|
 | `APP_ENV` | `development` | não | `development`, `test` ou `production`. Em produção ativa as travas da tabela final. |
-| `RATE_LIMITS_PROFILE` | `default` | não | Conjunto de limites de abuso: `default` (produção) ou `test` (perfil frouxo da suíte automatizada). **Recusado em produção** — o boot falha. Valor desconhecido também falha. Ver `docs/SEGURANCA.md` §5.2. |
+| `RATE_LIMITS_PROFILE` | `default` | não | Conjunto de limites de abuso: `default` (produção), `test` (perfil frouxo da suíte automatizada, exige `APP_ENV=test`) ou `dev` (máquina de desenvolvimento: eleva **só** os tetos da importação, exige `APP_ENV=development`). **Qualquer valor diferente de `default` é recusado em produção** — o boot falha. Valor desconhecido também falha. Ver `docs/SEGURANCA.md` §5.2. |
 
 ### Servidor HTTP
 
@@ -233,7 +233,7 @@ O boot **falha** se qualquer uma destas condições ocorrer:
 - `COOKIE_SECURE=false`;
 - `CORS_ORIGIN` vazio ou com curinga;
 - `DB_DRIVER=sqlite`;
-- `RATE_LIMITS_PROFILE=test` — é o perfil frouxo da suíte automatizada.
+- `RATE_LIMITS_PROFILE` diferente de `default` — `test` é o perfil frouxo da suíte automatizada e `dev` o da máquina de desenvolvimento.
 
 E, em **qualquer** ambiente: `JWT_SECRET` ou `OTP_PEPPER` com menos de 32 bytes, ou iguais entre si.
 
@@ -242,9 +242,11 @@ E, em **qualquer** ambiente: `JWT_SECRET` ou `OTP_PEPPER` com menos de 32 bytes,
 | Item | Valor | Por quê |
 |---|---|---|
 | Limite de corpo da requisição | 1 MiB | Afrouxar por env seria um botão de negação de serviço. |
-| Limites de taxa, **regra a regra** | §7 da spec 0001 (ver abaixo) | São limites de segurança, não sintonia operacional: mudar um valor exige código revisado. Ficam em `config.DefaultRateLimits()`. **Não existe** variável por limite (`RATE_LIMIT_IMPORT_UPLOAD=…` não é lida por nada) — é por aí que um teto frouxo vaza para produção sem aparecer em revisão. O único interruptor é `RATE_LIMITS_PROFILE`, que troca o **conjunto inteiro** e é recusado em produção (`docs/SEGURANCA.md` §5.2). |
+| Limites de taxa, **regra a regra** | §7 da spec 0001 (ver abaixo) | São limites de segurança, não sintonia operacional: mudar um valor exige código revisado. Ficam em `config.DefaultRateLimits()`. **Não existe** variável por limite (`RATE_LIMIT_IMPORT_UPLOAD=…` não é lida por nada) — é por aí que um teto frouxo vaza para produção sem aparecer em revisão. O único interruptor é `RATE_LIMITS_PROFILE`, que escolhe um **conjunto nomeado** de limites (nunca uma regra solta) e é recusado em produção (`docs/SEGURANCA.md` §5.2). |
 
 **Limites de taxa vigentes** — global 100/min por IP · login 10/min por IP + 5/15min por conta · register 5/h por IP · resend-code 3/h por IP + cooldown de 60s por e-mail · forgot-password 5/h por IP + 3/h por conta · verify-email e reset-password 10/min por IP · refresh 60/min por IP · health/ready 60/min por IP.
+
+**Perfil `dev`** (desde 18/09/2026; exige `APP_ENV=development` **declarado**) — sobe **só** a cota da importação: `POST /imports` 50/h por casa, 100/h por IP e confirm 150/h, com o **estouro fixado na cota do padrão** (10, 20 e 30 de uma vez) para não mexer na concorrência instantânea por casa. Todo o resto continua nos tetos de produção.
 
 **Por casa** (chave = HMAC do `household_id`) — `POST /imports` 10/h (+20/h por IP) · `POST /imports/{id}/confirm` 30/h · `POST /transactions/auto-categorize` 60/h · `POST /transfers/detect` 60/h com estouro 3 · `PATCH /transactions/{id}` **120/h** (desde 17/09/2026: a rota escreve e audita a cada chamada, e o balde global por IP não é teto por casa; 120 acomoda a rajada legítima de categorizar uma fatura inteira).
 

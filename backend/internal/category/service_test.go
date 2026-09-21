@@ -61,6 +61,15 @@ type repoFake struct {
 	erroPalavras       error
 	colisoesForcadas   int
 	substituicoes      int
+
+	// Contadores do orçamento de comandos da semente (ADR-033, §7 item 9 do
+	// plano): a semente faz UMA consulta de donas para a casa inteira e NENHUM
+	// NameTaken — ela pula grupo pelo conjunto de nomes que já leu com List.
+	// Sem estes contadores, um "conserto" que voltasse a consultar por item
+	// passaria despercebido: o resultado seria o mesmo, só que com 56 idas ao
+	// banco dentro da transação que cria a casa.
+	donasConsultadas int
+	nomesConsultados int
 }
 
 func novoRepo() *repoFake {
@@ -161,6 +170,7 @@ func (r *repoFake) ListKeywords(_ context.Context, householdID string) ([]catego
 }
 
 func (r *repoFake) KeywordOwners(_ context.Context, householdID string, norms []string) (map[string]string, error) {
+	r.donasConsultadas++
 	out := map[string]string{}
 	if r.ocultarDonasUmaVez {
 		r.ocultarDonasUmaVez = false
@@ -228,6 +238,7 @@ func (r *repoFake) DeleteKeywords(_ context.Context, householdID, categoryID str
 }
 
 func (r *repoFake) NameTaken(_ context.Context, householdID string, parentID *string, nameNorm, exceptID string) (bool, error) {
+	r.nomesConsultados++
 	for _, c := range r.linhas {
 		if c.HouseholdID != householdID || c.DeletedAt != nil || c.ArchivedAt != nil || c.ID == exceptID {
 			continue
@@ -771,21 +782,23 @@ func TestSementeCriaOsGruposIniciais(t *testing.T) {
 
 	arvore, err := svc.List(ctx, ator(minhaCasa), category.ListInput{})
 	require.NoError(t, err)
-	assert.Len(t, arvore.Expense, 10)
+	assert.Len(t, arvore.Expense, 11)
 	assert.Len(t, arvore.Income, 2)
 
-	nomes := make([]string, 0, 12)
+	nomes := make([]string, 0, 13)
 	for _, g := range append(append([]category.View{}, arvore.Expense...), arvore.Income...) {
 		nomes = append(nomes, g.Name)
-		assert.Nil(t, g.ParentID, "a semente cria só grupos")
+		assert.Nil(t, g.ParentID, "o primeiro nível da árvore é só de grupos")
 	}
 	assert.Contains(t, nomes, "Moradia")
 	assert.Contains(t, nomes, "Alimentação")
 	assert.Contains(t, nomes, "Salário")
 }
 
-// EnsureDefault roda também no login, como auto-reparo. Sem idempotência, cada
-// login duplicaria as doze categorias.
+// A semente roda UMA vez por casa, na criação dela: EnsureDefault devolve cedo
+// quando o usuário já tem casa. A idempotência continua sendo exigida como
+// defesa em profundidade (ADR-033b) — uma segunda execução é no-op TOTAL, sem
+// grupo, sem folha e sem palavra repetida.
 func TestSementeEhIdempotente(t *testing.T) {
 	t.Parallel()
 
@@ -799,10 +812,12 @@ func TestSementeEhIdempotente(t *testing.T) {
 
 	total, err := repo.CountAll(ctx, minhaCasa)
 	require.NoError(t, err)
-	// Contra a lista, e não contra um número escrito à mão: a semente cresce
-	// (ADR-029a acrescentou "Investimentos" e "Resgates") e o que este teste
-	// fixa é a IDEMPOTÊNCIA, não o tamanho.
-	assert.EqualValues(t, len(category.DefaultGroups()), total)
+	// Contra a tabela, e não contra um número escrito à mão: a semente cresce
+	// (o ADR-029a acrescentou "Investimentos" e "Resgates", o ADR-033 as
+	// subcategorias) e o que este teste fixa é a IDEMPOTÊNCIA, não o tamanho.
+	// DefaultCategoryCount conta grupos MAIS folhas — len(DefaultGroups())
+	// contaria só os grupos.
+	assert.EqualValues(t, category.DefaultCategoryCount(), total)
 }
 
 // Nenhuma categoria da semente é "de sistema": todas se editam, arquivam e
@@ -818,12 +833,26 @@ func TestCategoriaDaSementeEhEditavelEExcluivel(t *testing.T) {
 	arvore, err := svc.List(ctx, ator(minhaCasa), category.ListInput{})
 	require.NoError(t, err)
 	primeira := arvore.Expense[0]
+	require.NotEmpty(t, primeira.Children, "o primeiro grupo de despesa da semente tem filhas")
 
 	novoNome := "Casa e moradia"
 	renomeada, err := svc.Update(ctx, ator(minhaCasa), primeira.ID, category.UpdateInput{Name: &novoNome})
 	require.NoError(t, err)
 	assert.Equal(t, "Casa e moradia", renomeada.Name)
 
+	// A FOLHA da semente se exclui como qualquer outra, e as palavras-chave
+	// dela saem junto (DeleteKeywords na mesma transação).
+	folha := primeira.Children[0]
+	require.NoError(t, svc.Delete(ctx, ator(minhaCasa), folha.ID))
+	assert.Empty(t, repo.palavras[folha.ID])
+
+	// O GRUPO com filhas recusa a exclusão por ErrInUse — a regra de sempre
+	// (filha é uso), não um privilégio de categoria "de sistema". Excluídas as
+	// filhas, ele sai.
+	assert.ErrorIs(t, svc.Delete(ctx, ator(minhaCasa), primeira.ID), category.ErrInUse)
+	for _, restante := range primeira.Children[1:] {
+		require.NoError(t, svc.Delete(ctx, ator(minhaCasa), restante.ID))
+	}
 	assert.NoError(t, svc.Delete(ctx, ator(minhaCasa), primeira.ID))
 }
 
@@ -842,6 +871,6 @@ func TestSementeNaoVazaEntreCasas(t *testing.T) {
 	for _, casa := range []string{minhaCasa, outraCasa} {
 		total, err := repo.CountAll(ctx, casa)
 		require.NoError(t, err)
-		assert.EqualValues(t, len(category.DefaultGroups()), total, "casa %s", casa)
+		assert.EqualValues(t, category.DefaultCategoryCount(), total, "casa %s", casa)
 	}
 }

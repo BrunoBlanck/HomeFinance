@@ -5,21 +5,63 @@ import type {
   AutoCategorizeResult,
   Transaction,
   TransactionKind,
+  TransactionKindGroup,
   TransactionList,
   TransactionSummary,
   UpdateTransactionCategoryInput,
 } from '@/api/types'
+import type { TipoDeLancamento } from '@/app/search'
 
 /** Chamadas de lançamento. Nenhum tipo de payload é escrito aqui: todos derivam
  *  do contrato OpenAPI (ADR-015). */
 
-export type { Transaction, TransactionKind, TransactionList, TransactionSummary }
+export type {
+  Transaction,
+  TransactionKind,
+  TransactionKindGroup,
+  TransactionList,
+  TransactionSummary,
+}
 
 export type FiltroDeLancamentos = {
   /** `AAAA-MM`, obrigatório no contrato — não existe "o mês atual por padrão". */
   mes: string
   /** Conta da casa. Ausente = todas. */
   contaId?: string | undefined
+  /** Recorte por tipo (emenda E2d). Ausente = Tudo, que é a URL canônica. */
+  tipo?: TipoDeLancamento | undefined
+  /** Recorte por categoria — o atalho do relatório. Ausente = todas.
+   *
+   *  Grupo traz as filhas junto, e quem expande é o SERVIDOR: mandar a lista
+   *  de filhas daqui faria o cliente montar um conjunto que o relatório monta
+   *  do outro lado, e duas montagens divergem no dia em que alguém mexer na
+   *  árvore entre as duas telas. */
+  categoriaId?: string | undefined
+}
+
+/** A tradução `tipo` (palavra da URL, pt-BR) → `kindGroup` (valor da API).
+ *
+ *  Existe **uma vez**, aqui, e mora ao lado da chave da query porque as duas
+ *  coisas têm de contar a mesma história. Errar um nome neste `switch` é grave
+ *  de um jeito específico e silencioso: mandar `kindGroup=despesas` faria o
+ *  servidor **ignorar** o parâmetro desconhecido e devolver a janela inteira,
+ *  enquanto o seletor da tela continuaria afirmando "Despesas". Nada estoura —
+ *  a tela só mente. Daí o teste sobre as cinco opções.
+ *
+ *  `switch` exaustivo sem `default`: uma opção nova em `TipoDeLancamento` vira
+ *  erro de compilação aqui, não uma requisição sem filtro. */
+export function grupoDeTipo(tipo: TipoDeLancamento | undefined): TransactionKindGroup | undefined {
+  if (tipo === undefined) return undefined
+  switch (tipo) {
+    case 'receitas':
+      return 'income'
+    case 'despesas':
+      return 'expense'
+    case 'transferencias':
+      return 'transfer'
+    case 'investimentos':
+      return 'investment'
+  }
 }
 
 /** Quantas linhas por página. É o default do contrato, escrito aqui porque o
@@ -27,8 +69,25 @@ export type FiltroDeLancamentos = {
  *  não bate com o da requisição é uma mentira pequena que ninguém depura. */
 export const POR_PAGINA = 50
 
+/** A chave da query.
+ *
+ *  O `tipo` entra nela porque o filtro é **do servidor**: sem ele, trocar de
+ *  filtro serviria as linhas do filtro anterior a partir do cache. E é o que
+ *  faz a troca **descartar o cursor** — chave nova, `infiniteQuery` nova,
+ *  primeira página. O cursor é posição, não filtro (ADR-030d): continuá-lo em
+ *  outro recorte pularia o começo da lista nova. */
 export const transactionsQueryKey = (filtro: FiltroDeLancamentos) =>
-  ['transactions', { mes: filtro.mes, contaId: filtro.contaId ?? null }] as const
+  [
+    'transactions',
+    {
+      mes: filtro.mes,
+      contaId: filtro.contaId ?? null,
+      tipo: filtro.tipo ?? null,
+      // Pelo mesmo motivo do `tipo`: o recorte é do SERVIDOR, e sem ele na
+      // chave entrar numa categoria serviria as linhas da anterior do cache.
+      categoriaId: filtro.categoriaId ?? null,
+    },
+  ] as const
 
 /** Listagem paginada por cursor.
  *
@@ -45,6 +104,13 @@ export function transactionsInfiniteQueryOptions(filtro: FiltroDeLancamentos) {
       // isto é a segunda camada, e ela custa nada.
       const busca = new URLSearchParams({ month: filtro.mes, limit: String(POR_PAGINA) })
       if (filtro.contaId) busca.set('accountId', filtro.contaId)
+      // Ausente = Tudo. `kindGroup=all` não existe no contrato e é 400 — o
+      // recorte se desliga apagando a chave, como o filtro de conta.
+      const grupo = grupoDeTipo(filtro.tipo)
+      if (grupo) busca.set('kindGroup', grupo)
+      // `set`, nunca `append`: a chave repetida é 400 no contrato, e é uma
+      // ambiguidade que não se produz de propósito.
+      if (filtro.categoriaId) busca.set('categoryId', filtro.categoriaId)
       if (pageParam) busca.set('cursor', pageParam)
       return apiRequest<TransactionList>(`/transactions?${busca.toString()}`, { signal })
     },

@@ -20,6 +20,35 @@ import (
 // pediu sem ninguém notar (S4).
 const MaxAPIPageSize = 100
 
+// msgKindGroup é a ÚNICA redação do 400 do filtro de tipo (spec 0004 §12,
+// emenda E2d).
+//
+// Ela cita a ALLOWLIST e nunca o valor recebido. Ecoar a entrada numa
+// mensagem de erro é como uma query mal formada vira XSS refletido no cliente
+// que a renderiza sem escapar — e, aqui, seria ainda um convite a usar o campo
+// como canal de teste. Pelo mesmo motivo nada é logado neste caminho: o valor
+// recusado é entrada bruta de terceiro (S8).
+//
+// Mora numa constante porque a borda e o `fail` precisam dizer a MESMA coisa:
+// duas redações divergiriam, e a segunda seria a que ninguém revisou.
+const msgKindGroup = "Informe um destes tipos: income, expense, transfer ou investment."
+
+// msgKindGroupRepetido é a redação do 400 da chave REPETIDA (spec 0004
+// §12.5.5) — e é própria, não a de cima.
+//
+// Reaproveitar msgKindGroup diria "Informe um destes tipos: …" para quem
+// informou DOIS tipos válidos: instrução errada para o defeito real, e a
+// pessoa tentaria de novo com um valor que já estava certo. Esta aponta a
+// AÇÃO, e é tudo o que ela faz: não ecoa nenhum dos valores recebidos e não
+// diz quantas ocorrências chegaram — contar para o cliente o que ele mandou é
+// devolver a entrada dele pela porta do erro.
+const msgKindGroupRepetido = "Informe o tipo uma única vez."
+
+// msgCategoriaRepetida é o 400 da chave `categoryId` repetida. Mesma recusa
+// de ambiguidade de msgKindGroupRepetido, mesma economia: não ecoa nenhum dos
+// ids recebidos e não diz quantos chegaram.
+const msgCategoriaRepetida = "Informe a categoria uma única vez."
+
 // Handler expõe os endpoints de lançamento.
 type Handler struct {
 	svc            *Service
@@ -52,11 +81,62 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// O filtro de TIPO é conferido AQUI, na borda, em duas perguntas
+	// independentes e nesta ordem.
+	//
+	// (1) A chave é INEQUÍVOCA? `?kindGroup=expense&kindGroup=income` é 400
+	// (spec 0004 §12.5.5). `url.Values.Get` devolveria o PRIMEIRO valor em
+	// silêncio, e "o primeiro vence" é uma opinião que proxy, WAF, coletor de
+	// log e cliente não são obrigados a compartilhar: a MESMA URL viraria
+	// listas diferentes conforme quem a lê. A recusa é da AMBIGUIDADE, não da
+	// discordância — valores iguais e segunda ocorrência vazia também são 400,
+	// e a segunda vazia é a pior das três (quem lê a última obtém "Tudo", o
+	// filtro evapora e a tela mostra o mês inteiro sob o rótulo "Despesas").
+	// UMA ocorrência vazia continua sendo Tudo, 200: uma ocorrência não é
+	// ambígua.
+	//
+	// A mensagem é PRÓPRIA, e não a da allowlist: quem mandou dois tipos
+	// VÁLIDOS precisa ler "informe uma única vez", e não "informe um destes
+	// tipos" — que seria instrução errada para o defeito real. Ela não ecoa
+	// valor e não diz quantas ocorrências chegaram.
+	//
+	// (2) O valor está na ALLOWLIST fechada do domínio (spec 0004 §12)?
+	// Ausente e vazio passam — os dois são "Tudo" —, e qualquer outra coisa
+	// para no 400 sem chegar ao serviço.
+	//
+	// Nenhuma das duas repete o que veio: `?kindGroup=transfer_out` e
+	// `?kindGroup=expense' OR 1=1 --` recebem exatamente a mesma mensagem, que
+	// é a lista dos quatro valores aceitos. O valor recusado também não vai
+	// para o log.
+	grupo, err := httpserver.SoleQueryValue(q, "kindGroup")
+	if err != nil {
+		httpserver.WriteValidationError(w, map[string]string{"kindGroup": msgKindGroupRepetido})
+		return
+	}
+	if !ValidKindGroup(grupo) {
+		httpserver.WriteValidationError(w, map[string]string{"kindGroup": msgKindGroup})
+		return
+	}
+
+	// O filtro de CATEGORIA passa pela mesma pergunta (1) do de tipo: a chave
+	// é inequívoca? `?categoryId=A&categoryId=B` é 400 pelo mesmo motivo —
+	// "o primeiro vence" é opinião de quem lê, e a MESMA URL viraria listas
+	// diferentes. A pergunta (2), "existe e é desta casa?", não tem allowlist
+	// para ser feita aqui: ela é do serviço, que responde 404 (S1) sem dizer
+	// se o id existe em outra casa.
+	categoria, err := httpserver.SoleQueryValue(q, "categoryId")
+	if err != nil {
+		httpserver.WriteValidationError(w, map[string]string{"categoryId": msgCategoriaRepetida})
+		return
+	}
+
 	view, err := h.svc.List(r.Context(), ator, ListInput{
-		Month:     q.Get("month"),
-		AccountID: q.Get("accountId"),
-		Cursor:    q.Get("cursor"),
-		Limit:     limite,
+		Month:      q.Get("month"),
+		AccountID:  q.Get("accountId"),
+		KindGroup:  grupo,
+		CategoryID: categoria,
+		Cursor:     q.Get("cursor"),
+		Limit:      limite,
 	})
 	if err != nil {
 		h.fail(w, r, err, "listando lançamentos")
@@ -352,6 +432,20 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error, contex
 	case errors.Is(err, ErrInvalidMonth):
 		httpserver.WriteValidationError(w, map[string]string{
 			"month": "Informe o mês no formato AAAA-MM.",
+		})
+
+	case errors.Is(err, ErrUnknownKindGroup):
+		// 400 em `fields.kindGroup`, com a MESMA mensagem da borda e sem o
+		// valor recebido.
+		//
+		// A borda já recusou antes de chamar o serviço, então este caso é
+		// defesa em profundidade: ele existe para o dia em que outro caminho
+		// montar um ListFilter por conta própria. É 400, e não 500, porque a
+		// origem do valor é sempre o cliente — diferente de
+		// ErrEmptyCategoryFilter, logo abaixo, que só pode ser defeito de
+		// ligação nosso.
+		httpserver.WriteValidationError(w, map[string]string{
+			"kindGroup": msgKindGroup,
 		})
 
 	case errors.Is(err, ErrAccountArchived):

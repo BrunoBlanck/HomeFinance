@@ -2,9 +2,11 @@ package importer_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,6 +49,11 @@ type ambiente struct {
 	repoTx     *gormstore.TransactionRepository
 	repoConta  *gormstore.AccountRepository
 	repoFatura *gormstore.CardStatementRepository
+
+	// contas é o repositório de contas VISTO PELOS SERVIÇOS (importação,
+	// lançamentos e faturas). É o repoConta embutido no dublê de collation
+	// frouxa, desligado por padrão.
+	contas *contasComColacaoFrouxa
 
 	svc          *importer.Service
 	txSvc        *transaction.Service
@@ -107,6 +114,49 @@ func (c *categoriasContadas) zerar() {
 // ListKeywords andam em par dentro de classify.Load).
 func (c *categoriasContadas) carregamentos() (int64, int64) {
 	return c.listas.Load(), c.palavras.Load()
+}
+
+// contasComColacaoFrouxa embute o repositório REAL de contas e, com `frouxa`
+// ligada, imita o casamento que `WHERE id = ?` faz nos dialetos cuja COLLATION
+// não é binária.
+//
+// Por que ele existe: as colunas de id são `varchar(36)` sem collation
+// declarada e nada fixa charset na abertura da conexão, então o `=` do MySQL 8
+// usa `utf8mb4_0900_ai_ci` (ignora CAIXA e acento) e o do MSSQL usa `CI_AS`
+// com padding ANSI (ignora ESPAÇO À DIREITA). Este harness roda contra SQLite,
+// onde o `=` é binário — ali o `ByID` responde 404 e a classe de defeito
+// "gravei a string do cliente em vez do id canônico" NÃO REPRODUZ. Como
+// testcontainers não está no go.mod e não há Docker nesta máquina, a collation
+// frouxa é reproduzida aqui, no dublê, e não num dialeto.
+//
+// Ele EMBUTE o repositório (não o substitui): todo o resto da interface
+// continua indo ao SQLite de verdade, e o único desvio é o casamento do ByID.
+// Desligado por padrão — só o teste que mede esta classe o liga.
+type contasComColacaoFrouxa struct {
+	*gormstore.AccountRepository
+	frouxa atomic.Bool
+}
+
+func (c *contasComColacaoFrouxa) ByID(ctx context.Context, householdID, id string) (*account.Account, error) {
+	encontrada, err := c.AccountRepository.ByID(ctx, householdID, id)
+	if err == nil || !c.frouxa.Load() || !errors.Is(err, account.ErrNotFound) {
+		return encontrada, err
+	}
+	// O SQLite não casou; MySQL/MSSQL casariam. Repete a busca pela regra
+	// FROUXA — sempre dentro da MESMA casa, porque a collation afrouxa a
+	// comparação do id, nunca o escopo por household.
+	lista, erroDaLista := c.AccountRepository.List(ctx, householdID, true)
+	if erroDaLista != nil {
+		return nil, erroDaLista
+	}
+	alvo := strings.TrimRight(id, " ")
+	for i := range lista {
+		if strings.EqualFold(alvo, lista[i].ID) {
+			copia := lista[i]
+			return &copia, nil
+		}
+	}
+	return nil, err
 }
 
 // relogioFake é o relógio injetado. Ele existe para o TTL do lote e para o
@@ -200,6 +250,8 @@ func novoAmbiente(t *testing.T, opts ...importer.Option) *ambiente {
 		relogio:    novoRelogio(time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)),
 	}
 
+	a.contas = &contasComColacaoFrouxa{AccountRepository: a.repoConta}
+
 	uow := gormstore.NewUnitOfWork(db)
 	casas := gormstore.NewHouseholdRepository(db)
 	vinculos := gormstore.NewMembershipRepository(db)
@@ -225,11 +277,11 @@ func novoAmbiente(t *testing.T, opts ...importer.Option) *ambiente {
 
 	a.contadorDeCategorias = &categoriasContadas{CategoryRepository: categorias}
 	a.classificador = classify.NewLoader(a.contadorDeCategorias, a.repoConta)
-	a.txSvc = transaction.NewService(a.repoTx, a.repoConta, categorias, a.repoFatura, uow, a.classificador,
+	a.txSvc = transaction.NewService(a.repoTx, a.contas, categorias, a.repoFatura, uow, a.classificador,
 		transaction.WithAudit(auditoriaLancamento{alvo: a.auditoria}),
 		transaction.WithClock(a.relogio.now),
 	)
-	a.stmtSvc = cardstatement.NewService(a.repoFatura, a.repoConta, householdSvc,
+	a.stmtSvc = cardstatement.NewService(a.repoFatura, a.contas, householdSvc,
 		transaction.NewStatementTotals(a.repoTx), uow,
 		cardstatement.WithAudit(auditoriaFatura{alvo: a.auditoria}),
 		cardstatement.WithClock(a.relogio.now),
@@ -238,7 +290,7 @@ func novoAmbiente(t *testing.T, opts ...importer.Option) *ambiente {
 	registro, err := importer.NewRegistry(nubank.NewChecking(), nubank.NewCard())
 	require.NoError(t, err)
 
-	a.svc = importer.NewService(a.repoImport, registro, a.repoConta, a.repoTx,
+	a.svc = importer.NewService(a.repoImport, registro, a.contas, a.repoTx,
 		a.txSvc, a.stmtSvc, uow, a.classificador,
 		append([]importer.Option{
 			importer.WithAudit(a.auditoria),

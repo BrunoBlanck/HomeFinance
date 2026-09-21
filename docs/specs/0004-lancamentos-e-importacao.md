@@ -34,7 +34,8 @@ importação.
 **Importação (o coração da entrega).** Fluxo de duas fases (enviar → revisar → confirmar) com
 **staging no banco** · CSV solto e **ZIP protegido por senha** (ZipCrypto, extração em memória) ·
 arquitetura de parser como plugin por **(instituição × tipo de documento)** com detecção por cabeçalho
-· **quatro parsers prontos, registrados e testados** — extrato e fatura do Nubank e do C6 (§7.3) ·
+· **cinco parsers prontos, registrados e testados** — extrato e fatura do Nubank e do C6 (§7.3) e
+extrato do Inter (§7.4, 18/09/2026) ·
 **deduplicação em camadas com garantia no banco** (§4) ·
 classificação de pagamento de fatura com opção de virar transferência · auditoria por lote · limites
 rígidos e rate limit próprio.
@@ -861,14 +862,15 @@ backend/internal/importer/
   sanitize/       descrição, controle, direção Unicode, truncagem em 140
   dedup/          chave canônica, ordinal, marcação fraca
   nubank/         checking.go, card.go, testdata/ (anonimizado)
-  c6/             PENDENTE — checking.go, card.go, testdata/
+  c6/             checking.go, card.go, testdata/ (anonimizado)
+  inter/          checking.go, testdata/ (anonimizado) — fatura PENDENTE de amostra
   service.go  handler.go  repository.go
 ```
 
 ```go
 type Parser interface {
     ID() string                                  // "nubank.checking.v1"
-    Institution() Institution                    // nubank | c6
+    Institution() Institution                    // nubank | c6 | inter
     DocKind() DocKind                            // checking_statement | card_statement
     Detect(header []string, sep rune) Confidence // none | weak | exact
     Parse(ctx context.Context, r *csv.Reader, limits Limits) (ParseResult, error)
@@ -955,6 +957,58 @@ que a próxima instituição siga o mesmo roteiro:
     existe desde o Go 1.24), mas **não nesta entrega**.
 11. **A senha é o CPF sem pontuação.** A UI **explica o formato e não pré-preenche nada**: o app não
     tem o CPF do usuário e não vai passar a ter por causa disto.
+
+### 7.4 Inter — extrato de conta entregue (18/09/2026); fatura pendente de amostra
+
+**Estado normativo: o parser do extrato do Inter está registrado** (`inter.checking.v1`, pacote
+`internal/importer/inter`), montado no `NewRegistry` do `main.go` ao lado dos quatro anteriores. A
+instituição `inter` entrou nas duas allowlists (`account.Institutions()` e `importer.Institution`), no
+enum `Institution` do contrato e no rótulo do frontend. **A fatura do cartão do Inter NÃO tem parser**:
+sem amostra não se declara convenção de sinal (ADR-024b), e os dois bancos anteriores provam que o
+mesmo emissor pode inverter o sinal entre extrato e fatura. Entra quando houver um arquivo real — e,
+até lá, uma fatura do Inter responde `IMPORT_FORMAT_UNKNOWN`, que é a resposta honesta.
+
+O mesmo checklist do C6, preenchido para o extrato:
+
+1. **Amostra anonimizada** em `backend/internal/importer/inter/testdata/inter_checking_v1.csv` — 7
+   linhas de dados com a **estrutura** do arquivo real (mesmo preâmbulo, mesmo "Pix enviado " com
+   espaço sobrando, LF sem BOM) e **conteúdo inteiramente sintético**: nome, conta, período, datas,
+   razões sociais e valores trocados, e a cadeia de saldos recalculada a partir de um saldo fictício. O
+   arquivo real fica em `Exemplos/`, que está no `.gitignore`. Dois testes em `cmd/api/parsers_test.go`
+   rodam **todas** as fixtures pelo registro que o `main.go` realmente monta (`newParserRegistry`) —
+   cada fixture casa com exatamente um parser, e todo parser registrado tem fixture —, e
+   `importer/inter_ponta_a_ponta_test.go` cobre o caminho completo pela API (feliz, reimportação e a
+   trava nos dois sentidos).
+2. **Assinatura e separador.** `Data Lançamento;Histórico;Descrição;Valor;Saldo`, separador
+   **ponto-e-vírgula**. Começa com "Data Lançamento" como o extrato do C6, mas o resto do cabeçalho e o
+   separador são outros: o teste-ouro prova que cada uma das **cinco** fixtures casa com exatamente um
+   parser.
+3. **Data e número.** `DD/MM/YYYY` e **número brasileiro** — vírgula decimal, ponto de milhar
+   (`-9.950,00`, `13.000,00`): `csvtext.DecimalComma`, o formato da fatura do Nubank, e **não** o dos
+   outros dois extratos. É a constante que mais custa se vier errada; declarada errada, toda linha cai
+   rejeitada e o arquivo inteiro é recusado por `ErrTooManyRejected` — comportamento certo para "parser
+   errado". Há teste que trava os centavos.
+4. **Convenção de sinal.** Valor com sinal, **negativo é saída** (`SignNegativeIsOutflow`), como o
+   extrato do Nubank. O Histórico ("Pix enviado"/"Pix recebido") **não** participa da decisão do kind —
+   um "Pix recebido" com valor negativo é saída com texto estranho, não entrada consertada.
+5. **Identificador por linha?** **Não.** `ExternalID` nil, chave derivada com ordinal, como o C6.
+6. **Preâmbulo.** **5 linhas** (título, `Conta ;…`, `Período ;…`, `Saldo ;…`, linha em branco); o
+   cabeçalho real é a 6ª linha física. Diferente do C6, três linhas do preâmbulo **têm** `;` — elas são
+   puladas porque nenhum parser as reconhece como cabeçalho, não por falta de separador. Nenhum rodapé.
+7. **Fechamento/vencimento?** Não se aplica: é extrato. `Statement` nil.
+8. **Descrição.** O Inter separa o **tipo** da operação (`Histórico`: "Pix enviado", "Pagamento
+   efetuado") da **contraparte** (`Descrição`: "Receita Federal"). As duas são juntadas com ` - ` — o
+   separador de segmentos do sanitize — e a descrição gravada fica **"Pix enviado - Receita Federal"**:
+   a mesma forma "tipo - contraparte" do Nubank, com a contraparte onde a palavra-chave da conta (spec
+   0005) a encontra. O espaço sobrando que o banco deixa em "Pix enviado " é aparado antes de juntar;
+   coluna vazia não pendura separador.
+9. **Encoding e terminador.** **UTF-8 sem BOM**, **LF**. O núcleo lida sem o parser saber.
+10. **ZIP.** Não se aplica: o Inter exporta o CSV solto.
+11. **Classificação.** Allowlist de um prefixo sobre o Histórico: "pagamento de fatura" →
+    `pagamento_de_fatura`. ⚠️ A amostra **não tinha** pagamento de fatura; o prefixo é o texto esperado
+    e fica **a confirmar** com um extrato real que traga um. Custo de errar é zero (nunca casa → sem
+    sugestão) ou baixo (sugere, e a pessoa decide); um boleto vem como "Pagamento efetuado - …" e
+    continua sem sugestão.
 
 ---
 
@@ -1095,3 +1149,172 @@ Verificáveis. Os casos de abuso estão no meio, não num apêndice.
 | RE5 | Staging vira tabela grande e esquecida | baixa | TTL de 24 h, janitor, e linhas apagadas no commit — tudo com teste de relógio injetado |
 | RE6 | `competence_month` semeia divergência em E4–E6 | média | O ADR-023 decide **agora** que o mês do app é competência, e as duas colunas são sempre gravadas |
 | RE7 | O usuário importa na conta errada e descobre tarde | média | Trava de instituição, trava de `kind` e o resumo do passo 3 dizendo conta e período |
+
+---
+
+## 12. Emenda de 18/09/2026 — filtro de tipo em `GET /transactions` (E2d, pedido do usuário)
+
+> **Norma e numeração.** Esta emenda **é** a spec da E2d. O número 0007 chegou a ser reservado para
+> ela (`PLANOS.md` §9.1) e é assim que aparece em `docs/BANCO-DE-DADOS.md` e em comentários do
+> código, mas o arquivo `docs/specs/0007-*.md` **não existe e não vai nascer**: a E2d **corrige** o
+> §1.2 desta spec, então ela mora aqui, como emenda — é o mesmo padrão da emenda §11 da spec 0005.
+> A E4 já ficou com a 0008 por causa disso. Decisões estruturais: **ADR-030**. Direção de interface:
+> `docs/DESIGN.md`, seção **E2d**, que é normativa e **vence este texto** em caso de conflito sobre
+> interface (o que é da tela está na §1.6 da spec de design 0004). Consultas, dialetos e medições:
+> `docs/BANCO-DE-DADOS.md`, "Schema v4 — sem mudança: filtro de tipo".
+
+### 12.1 O que esta emenda corrige no §1.2
+
+A linha "**Filtros densos** (`categoryId`, `kind`, `q`, `minCents`/`maxCents`, `sort`) → E2b", escrita
+em 16/09/2026, **está errada quanto ao `kind`**. Leia-se:
+
+- **`kind` sai daquela lista e é entregue na E2d** — não como `kind` cru, e sim como **`kindGroup`**,
+  um agrupamento sobre ele (ADR-030a). O filtro desta tela passa a ser `month` + `accountId` +
+  **`kindGroup`** + paginação.
+- **Continua na E2b, sem exceção** — a antecipação foi de **um** filtro, não da linha inteira:
+  `categoryId` · busca por descrição (`q`) **e a busca normalizada (P2) que vem com ela** · faixa de
+  valor (`minCents`/`maxCents`) · `sort` (a ordenação segue `occurred_on DESC, id DESC`, **constante
+  no código** — P6/S4) · **CRUD manual de lançamento** (`POST`, `PATCH` completo, criação rápida e
+  diálogo de novo lançamento; o `PATCH` só de `categoryId` da emenda §11 da spec 0005 continua sendo
+  a única exceção já aberta) · edição de lançamento importado.
+- Os demais itens do §1.2 ficam como estão. `POST`/`PATCH`/`DELETE /transfers` saiu da E2b pela E2c
+  (spec 0005 §13), e isso não é assunto desta emenda.
+
+### 12.2 Contrato
+
+`GET /transactions` ganha **um** parâmetro, e nenhuma rota nova:
+
+| Parâmetro | Valores | Ausente |
+|---|---|---|
+| `kindGroup` | allowlist **fechada**: `income` · `expense` · `transfer` · `investment` | = tudo, e é a **URL canônica** (a chave simplesmente não aparece) |
+
+- Valor fora da allowlist → **400 `VALIDATION`** em `fields.kindGroup`, sem detalhe. **Nunca** "sem
+  filtro" (ADR-030a): tratar o desconhecido como ausente devolveria a janela inteira a quem pediu um
+  recorte. O repositório recusa de novo (`ErrUnknownKindGroup`) **sem emitir comando**, como defesa em
+  profundidade.
+- O parâmetro filtra **a lista**. O `summary` **não responde a ele no SQL** (ADR-030c): o `WHERE` é o
+  mesmo nas cinco opções e os cinco resumos saem por aritmética no servidor, sobre a mesma linha
+  agregada.
+- `transfer` = as duas pernas (`transfer_out` + `transfer_in`, ADR-016). `investment` = lançamentos
+  `income`/`expense` cuja categoria é de natureza `investment`/`redemption` (ADR-029d), **arquivadas
+  incluídas**. Casa sem nenhuma categoria marcada + `kindGroup=investment` → **lista vazia sem tocar o
+  banco** (ADR-029f); com `income`/`expense`, o SQL emitido volta a ser o de antes da E2d.
+- Nos grupos `income` e `expense` a exclusão dos marcados é
+  `(category_id IS NULL OR category_id NOT IN (M))` — **a guarda do `IS NULL` é obrigatória**, sob pena
+  de a opção "Despesas" perder toda despesa sem categoria em silêncio (ADR-030b).
+- **Cursor inalterado** — base64url de `occurredOn|id`, posição pura, sem impressão digital do filtro
+  (ADR-030d). O cliente descarta o cursor ao trocar de filtro; cursor cruzado continua significando
+  "continue depois desta posição", sem vazar linha de outra casa e sem repetir página.
+- **Nada muda** em `/card-statements`, `/imports`, `/transfers`, `/investments` e
+  `/reports/by-category` — em particular, o `kind` de `GET /reports/by-category` **continua**
+  `income|expense` (ADR-029h).
+
+**Valores do `summary` por opção** (o que a faixa do mês *exibe* está em `docs/DESIGN.md`, E2d (b)):
+
+| `kindGroup` | `incomeCents` | `expenseCents` | `netCents` | `count` | `uncategorizedCount` | `investedCents` / `redeemedCents` |
+|---|---|---|---|---|---|---|
+| ausente (tudo) | receitas − resgates | despesas − aportes | income − expense | todas as linhas | receitas + despesas sem categoria | os do mês |
+| `income` | o mesmo de tudo | 0 | = `incomeCents` | receitas (sem os resgates) | receitas sem categoria | **os mesmos** |
+| `expense` | 0 | o mesmo de tudo | = −`expenseCents` | despesas (sem os aportes) | despesas sem categoria | **os mesmos** |
+| `transfer` | 0 | 0 | 0 | pernas | **0 por construção** | **os mesmos** |
+| `investment` | 0 | 0 | 0 | aportes + resgates | **0 por construção** | **os mesmos** |
+
+Os dois zeros "por construção" são regra, não coincidência: perna de transferência nunca tem categoria
+(somar o `Uncategorized` dela publicaria pendência que ninguém consegue resolver — ADR-030c), e aporte
+e resgate **têm** categoria por definição, senão não estariam no filtro. A identidade
+`netCents == incomeCents − expenseCents` vale nas cinco linhas da tabela e é **verificada antes de
+publicar** (ADR-030 c′).
+
+### 12.3 A interação com a spec 0006 §3.5.2 (e por que a 2ª linha da faixa sobrevive ao filtro)
+
+A §3.5.2 da spec 0006 determinou três coisas que esta emenda **não pode contradizer**:
+`incomeCents`/`expenseCents`/`netCents` deixam de somar os lançamentos marcados como investimento; o
+`summary` ganha `investedCents` e `redeemedCents` **sempre presentes**; e a faixa do mês **diz em
+português** o que saiu ("e R$ 2.000,00 investidos"), porque total que encolhe sem explicação é mentira
+por omissão. O filtro de tipo é a partição **daquele mesmo corte**, e por isso:
+
+1. `investedCents` e `redeemedCents` são **iguais nas cinco opções**. Eles não descrevem a janela —
+   descrevem o que **saiu** de receita e despesa. São os **dois** campos de reconciliação do contrato,
+   e a exceção é **fechada** neles (ADR-030 c′): um terceiro campo desse tipo exige emenda ao ADR.
+2. A segunda linha da faixa **sobrevive ao filtro**, citando só o lado do dinheiro que o filtro nomeia:
+   sob `despesas`, "Fora destes números: R$ 2.000,00 em aportes"; sob `receitas`, só os resgates.
+   Apagá-la sob `?tipo=despesas` seria apagá-la exatamente onde a omissão é maior — quem chega por link
+   direto nunca viu a faixa de "Tudo".
+3. `Entrou` sob `receitas` é **idêntico** ao `Entrou` de "Tudo", e `Saiu` sob `despesas` é idêntico ao
+   de "Tudo": o corte do ADR-029(e) já estava aplicado **antes** do filtro. Um número que mudasse ao
+   filtrar denunciaria dupla contagem — por isso isto é critério de aceite (§12.5.3), e não observação.
+4. A exclusão do ADR-029(e) continua valendo em **duas agregações e mais nenhuma**. O que a E2d
+   acrescenta é uma **seleção de linhas** que usa o **mesmo** predicado (ADR-030f) — filtro de
+   listagem, não fonte de número. `/investimentos` continua sendo quem publica os totais de
+   investimento, e os dois caminhos leem o mesmo conjunto da mesma taxonomia para que não possam
+   divergir.
+5. O vetor de "esconder gasto" do ADR-029(i) passa a ter um **terceiro lugar** — a opção "Despesas".
+   **Não é vetor novo**, é o mesmo, com a mesma mitigação, e ela está escrita: a linha continua visível
+   em **"Tudo"** (o default e a URL canônica), aparece em **"Investimentos"**, a faixa nomeia a soma
+   subtraída em português e toda troca de categoria e de natureza segue auditada com autor.
+
+### 12.4 Frontend (o que aqui é decisão de contrato, não de pintura)
+
+- URL da tela: `?tipo=` com allowlist **em pt-BR** (`receitas` · `despesas` · `transferencias` ·
+  `investimentos`), validada com o mesmo rigor de `mes` e `conta` (P4); fora da lista, a chave some e a
+  tela abre em "Tudo", sem erro. A tradução `tipo → kindGroup` é **da tela**, nunca da URL.
+- **`semCategoria` é descartado** quando `tipo` é `transferencias` ou `investimentos`, em
+  `validarBusca` **e** em `aplicarNaBusca` — a combinação não tem resultado possível, e URL colada não
+  pode virar lista vazia sem saída.
+- `tipo` entra na **chave da query** de `transactions` (o filtro é do servidor: sem ele o cache
+  serviria as linhas do filtro anterior) e na `chaveDaBusca` que fecha o editor de categoria aberto.
+- Faixa do mês, subtotal do dia, faixa de pendência, colunas sob filtro, vazios, `caption`,
+  `document.title` e toda a copy: `docs/DESIGN.md`, E2d (a)–(h), e §1.6 da spec de design 0004.
+
+### 12.5 Critérios de aceite (viram os testes do `qa-testes`)
+
+Verificáveis, com os casos de abuso no meio e não num apêndice.
+
+1. **Despesa sem categoria não some** — o defeito mais perigoso desta feature. `kindGroup=expense`
+   devolve a despesa com `category_id NULL`; o teste executa as **duas formas** contra o banco real e
+   afirma a diferença medida: **sem a guarda, 1 linha; com a guarda, 2**.
+2. **Isolamento por casa nos quatro grupos.** Nenhuma linha de outra casa em `income`, `expense`,
+   `transfer` e `investment`. É este teste que prende o parêntese que o GORM põe em volta do `OR`:
+   sem ele o `OR` se espalha pelo `WHERE` inteiro e a consulta atravessa o `household_id`.
+3. **O resumo não muda de janela.** O **comando SQL emitido** pelo `Summary` é o mesmo nas cinco
+   opções (comparação do comando, não do resultado); `investedCents`/`redeemedCents` idênticos nas
+   cinco; `Entrou` sob `receitas` igual ao de "Tudo" e `Saiu` sob `despesas` igual ao de "Tudo";
+   `netCents == incomeCents − expenseCents` nas cinco.
+4. **Pendência.** `uncategorizedCount` é **0** sob `transferencias` e `investimentos` (nunca o `Count`
+   das pernas) e conta o **filtro** sob `receitas`/`despesas`.
+5. **Abuso — valor forjado.** `?kindGroup=tudo`, `?kindGroup=kind = 'income' OR 1=1`, valor vazio com
+   espaço e em maiúsculas respondem **400** sem detalhe, e **nenhum comando** vai ao banco.
+   `?tipo=` fora da allowlist na URL abre em "Tudo", sem erro na tela.
+
+   **Abuso — chave repetida (HPP).** `kindGroup` aparece **no máximo uma vez**. Duas ou mais
+   ocorrências são **400** em `fields.kindGroup`, **inclusive quando os valores são iguais e
+   inclusive quando uma delas é vazia** — a recusa é da ambiguidade da URL, não da discordância dos
+   valores. Uma única ocorrência vazia continua significando Tudo. A mensagem é própria (`Informe o
+   tipo uma única vez.`), não a da allowlist: quem mandou dois tipos válidos precisa da ação certa.
+6. **Abuso — cursor cruzado.** Cursor obtido em `despesas` e reenviado em `receitas` não devolve linha
+   de outra casa, não repete página e não quebra; trocar o filtro reinicia a lista, porque o `tipo`
+   está na chave da query.
+7. **Conjunto vazio.** Casa sem categoria marcada: `investment` devolve vazio **sem tocar o banco**;
+   `income`/`expense` emitem o SQL de antes da E2d, **sem `IN ()`** — testado nas três formas de vazio
+   (`nil`, slice vazio e slice só com string vazia).
+8. **Teto.** Mais de 200 ids no conjunto é `ErrTooManyCategories` → **500 genérico** (ADR-029 j.2),
+   nunca 4xx, com a contagem no log e **sem ids**.
+9. **Schema.** `AutoMigrate` sobre banco v4 **povoado**, duas vezes, com lista de DDL **vazia**; os
+   quatro grupos rodam contra o banco migrado depois disso.
+10. **Ordem e página.** O filtro **tira linhas**: não reordena e não repete página — ordem
+    `occurred_on DESC, id DESC` e cursor conferidos com o filtro ligado.
+11. **Gates.** `backend/scripts/check.ps1` completo e frontend com `tsc`, `biome`, `vitest`, `build`,
+    `npm audit` e **`api:check`** limpos (a spec do OpenAPI é editada **antes** do handler — ADR-006).
+    E2E de `/lancamentos`: trocar de tipo, colar URL com `?tipo=despesas`, e
+    `?tipo=transferencias&semCategoria=1` abrindo **sem** o `semCategoria`.
+12. **Revisão de segurança com veredito literal APROVADO.** Achado crítico ou alto bloqueia a entrega.
+
+### 12.6 Limites declarados desta emenda
+
+- **Só o SQLite foi medido de verdade.** Não há Docker nem `TEST_POSTGRES_DSN` nesta máquina:
+  PostgreSQL, MySQL e SQL Server estão **afirmados pelo SQL-92**, não verificados. Os testes já estão
+  escritos para rodar sozinhos quando a suíte de containers da E8 existir.
+- **Dívida anterior a esta emenda, e que ela não corrige:** em "Tudo", o subtotal do dia soma os
+  aportes (eles são `expense`) enquanto a faixa do mês os exclui, então a soma dos dias **não fecha**
+  com o `Resultado`. Registrada em `docs/DESIGN.md`, E2d (c), e no ADR-030; o `designer-ui` decide o
+  caminho antes de o código mudar.

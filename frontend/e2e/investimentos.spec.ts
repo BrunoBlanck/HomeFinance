@@ -31,7 +31,19 @@ import { entrarComContaNova } from './support/sessao'
  *  deixasse em qualquer mês de 2026 entraria nessa soma. Com o
  *  `RATE_LIMITS_PROFILE=test` do `global-setup.ts` o cadastro deixou de ser
  *  escasso, e a recomendação registrada em `sessao.setup.ts` é exatamente esta:
- *  quem precisa de isolamento de verdade cadastra a sua.
+ *  quem precisa de isolamento ARITMÉTICO cadastra a sua. (Casa própria não
+ *  isola mais de palavra-chave: desde a semente de categorias, ADR-033, toda
+ *  casa nova nasce com a lista de fábrica inteira.)
+ *
+ *  **O que a semente mudou aqui** (18/09/2026): este spec cadastrava «cdb» em
+ *  "Investimentos" e «resgate» em "Resgates" antes de importar. Não cadastra
+ *  mais — os dois grupos ganharam filhas, e grupo com filha não aceita palavra
+ *  nem é opção de `<select>` (spec 0005 §12/§13). As duas palavras vêm de
+ *  fábrica, na folha "Renda fixa e Tesouro Direto" de cada árvore, e a sugestão
+ *  da importação passou a apontar a FOLHA. A despesa comum do mês trocou de
+ *  `MERCADO`/`PADARIA` para `DORNEK`/`MULFAZ`, nomes conferidos contra o motor
+ *  real: ela precisa continuar sem categoria, e `MERCADO` casaria
+ *  «supermercado» por aproximação.
  *
  *  Roda em série: os testes deste arquivo contam a mesma história em ordem. */
 
@@ -44,9 +56,16 @@ const CONTA = 'Conta QA Investimentos'
  *  seria uma cópia de "no mês" e um erro na janela do ano passaria
  *  despercebido. */
 const MES = '2026-10'
-/** A palavra-chave do enunciado do critério 13. */
-const PALAVRA_DE_APORTE = 'cdb'
-const PALAVRA_DE_RESGATE = 'resgate'
+
+/** As folhas da semente que o mês inteiro exercita (ADR-033).
+ *
+ *  As duas se chamam igual — é proposital na semente, para a leitura das duas
+ *  árvores ficar espelhada —, e é legal porque a unicidade de nome é entre
+ *  IRMÃOS. Aqui elas nunca se confundem: o `<select>` de uma despesa só oferece
+ *  categorias do lado que SAI da conta, e o de uma receita só as do lado que
+ *  entra. O que distingue as duas na tela é o `<optgroup>`, e é ele que este
+ *  spec confere. */
+const FOLHA_DE_RENDA_FIXA = 'Renda fixa e Tesouro Direto'
 
 type Linha = { dia: string; valor: string; id: string; descricao: string }
 
@@ -64,7 +83,7 @@ const EXTRATO_MARCO: readonly Linha[] = [
 const EXTRATO_OUTUBRO: readonly Linha[] = [
   { dia: '05', valor: '-2000.00', id: '11', descricao: 'CDB 15 DIAS' },
   { dia: '12', valor: '850.00', id: '12', descricao: 'RESGATE CDB' },
-  { dia: '20', valor: '-300.00', id: '13', descricao: 'MERCADO QA INVEST' },
+  { dia: '20', valor: '-300.00', id: '13', descricao: 'DORNEK QA INVEST' },
 ]
 
 /** Extrato Nubank: `Data,Valor,Identificador,Descrição`, `DD/MM/YYYY`,
@@ -105,16 +124,6 @@ test.afterAll(async () => {
 
 // ------------------------------------------------------------- utilitários
 
-/** O `<input>` do `KeywordsField`. `exact` porque a lista de fichas se chama
- *  "Palavras-chave adicionadas" e casaria por substring. */
-function campoDePalavras(escopo: Page | Locator): Locator {
-  return escopo.getByLabel('Palavras-chave', { exact: true })
-}
-
-function fichas(escopo: Page | Locator): Locator {
-  return escopo.getByRole('list', { name: 'Palavras-chave adicionadas' }).getByRole('listitem')
-}
-
 /** O primeiro `1.234,56` de um texto.
  *
  *  Lê o mesmo número em lugares que o formatam de jeitos diferentes (a faixa
@@ -149,28 +158,20 @@ async function contagemDe(escopo: Page, rotulo: string): Promise<string> {
   return (await termo.textContent())?.replace(rotulo, '').trim() ?? ''
 }
 
-/** Acrescenta uma palavra-chave a uma categoria que já existe (a semente). */
-async function adicionarPalavraNaCategoria(
-  pagina: Page,
-  categoria: string,
-  palavra: string,
-): Promise<void> {
-  await pagina.goto('/categorias')
-  await pagina.getByRole('button', { name: `Editar ${categoria}` }).click()
-  const dialogo = pagina.locator('dialog[open]')
-  await expect(dialogo.getByRole('heading', { name: 'Editar categoria' })).toBeVisible()
-
-  await campoDePalavras(dialogo).fill(palavra)
-  await campoDePalavras(dialogo).press('Enter')
-  await expect(fichas(dialogo).filter({ hasText: palavra })).toHaveCount(1)
-
-  await dialogo.getByRole('button', { name: 'Salvar' }).click()
-  await expect(dialogo).toHaveCount(0)
-}
-
 /** O `<select>` de categoria de uma linha da revisão. */
 function categoriaDe(pagina: Page, descricao: string, data: string): Locator {
   return pagina.getByRole('combobox', { name: new RegExp(`^Categoria de ${descricao}, ${data},`) })
+}
+
+/** O rótulo do `<optgroup>` da opção escolhida — o nome do GRUPO a que a folha
+ *  pertence.
+ *
+ *  É o que distingue "Investimentos › Renda fixa e Tesouro Direto" de
+ *  "Resgates › Renda fixa e Tesouro Direto", que se chamam igual na semente. */
+async function grupoDaEscolhida(seletor: Locator): Promise<string> {
+  return seletor
+    .locator('option:checked')
+    .evaluate((opcao) => (opcao.parentElement as HTMLOptGroupElement | null)?.label ?? '')
 }
 
 /** Envia um extrato e confirma a importação inteira. */
@@ -227,7 +228,7 @@ test.describe('investimentos', () => {
     await expect(page.getByRole('button', { name: 'Detectar investimentos' }).first()).toBeVisible()
   })
 
-  test('a conta e as duas palavras-chave existem antes do resto', async () => {
+  test('a conta existe, e a semente já reconhece o aporte e o resgate', async () => {
     await page.goto('/contas')
     await page.getByRole('button', { name: 'Nova conta', exact: true }).click()
     const dialogo = page.locator('dialog[open]')
@@ -236,10 +237,28 @@ test.describe('investimentos', () => {
     await dialogo.getByRole('button', { name: 'Criar conta' }).click()
     await expect(page.getByRole('row', { name: new RegExp(CONTA) })).toBeVisible()
 
-    // As palavras entram nos grupos da SEMENTE: é o caminho de quem acabou de
-    // criar a casa, e não um cadastro inventado para o teste.
-    await adicionarPalavraNaCategoria(page, 'Investimentos', PALAVRA_DE_APORTE)
-    await adicionarPalavraNaCategoria(page, 'Resgates', PALAVRA_DE_RESGATE)
+    // Até 18/09/2026 este teste cadastrava «cdb» em "Investimentos" e
+    // «resgate» em "Resgates". Os dois passos morreram com a semente (ADR-033):
+    // os grupos ganharam filhas, e grupo com filha não aceita palavra-chave
+    // (spec 0005 §12) nem aparece como opção no `<select>` (§13). O que eles
+    // preparavam agora vem de fábrica, e é ISSO que a tela mostra aqui: as duas
+    // folhas existem, com as palavras do enunciado do critério 13 já dentro.
+    await page.goto('/categorias')
+    for (const [grupo, palavra] of [
+      ['Investimentos', 'cdb'],
+      ['Resgates', 'resgate cdb'],
+    ] as const) {
+      const regiao = page.getByRole('region', { name: grupo })
+      await expect(regiao.getByText(FOLHA_DE_RENDA_FIXA, { exact: true })).toBeVisible()
+      await regiao.getByRole('button', { name: `Editar ${FOLHA_DE_RENDA_FIXA}` }).click()
+      const dialogoDaFolha = page.locator('dialog[open]')
+      // A ficha existe, e é a da semente: o × dela traz a palavra no rótulo.
+      await expect(
+        dialogoDaFolha.getByRole('button', { name: `Remover ${palavra}`, exact: true }),
+      ).toHaveCount(1)
+      await page.keyboard.press('Escape')
+      await expect(page.locator('dialog[open]')).toHaveCount(0)
+    }
   })
 
   /** Critério 5 no navegador: a sugestão da importação atravessa as naturezas
@@ -248,18 +267,20 @@ test.describe('investimentos', () => {
     await importar(page, EXTRATO_MARCO, '03')
 
     await importar(page, EXTRATO_OUTUBRO, '10', async (pagina) => {
-      // Despesa → categoria de natureza `investment`.
-      await expect(
-        categoriaDe(pagina, 'CDB 15 DIAS', '05/10').locator('option:checked'),
-      ).toHaveText('Investimentos')
+      // Despesa → categoria de natureza `investment`. A folha é a da semente, e
+      // o `<optgroup>` é quem diz de qual das duas árvores ela veio — as duas
+      // folhas se chamam igual de propósito.
+      const doAporte = categoriaDe(pagina, 'CDB 15 DIAS', '05/10')
+      await expect(doAporte.locator('option:checked')).toHaveText(FOLHA_DE_RENDA_FIXA)
+      expect(await grupoDaEscolhida(doAporte)).toBe('Investimentos')
       // Receita → categoria de natureza `redemption`. Nunca a de aporte: o
       // matcher é escolhido pelo lado do dinheiro (ADR-029g).
-      await expect(
-        categoriaDe(pagina, 'RESGATE CDB', '12/10').locator('option:checked'),
-      ).toHaveText('Resgates')
+      const doResgate = categoriaDe(pagina, 'RESGATE CDB', '12/10')
+      await expect(doResgate.locator('option:checked')).toHaveText(FOLHA_DE_RENDA_FIXA)
+      expect(await grupoDaEscolhida(doResgate)).toBe('Resgates')
       // E a despesa comum, que não bate com nada, não ganha nada.
       await expect(
-        categoriaDe(pagina, 'MERCADO QA INVEST', '20/10').locator('option:checked'),
+        categoriaDe(pagina, 'DORNEK QA INVEST', '20/10').locator('option:checked'),
       ).toHaveText('Sem categoria')
     })
   })
@@ -297,7 +318,7 @@ test.describe('investimentos', () => {
     await expect(itens.getByRole('row', { name: /RESGATE CDB/ })).toContainText('Resgate')
     await expect(itens.getByRole('row', { name: /CDB 15 DIAS/ })).toContainText(CONTA)
     // A despesa comum do mês NÃO está aqui: a tela mostra o que foi marcado.
-    await expect(itens.getByRole('row', { name: /MERCADO QA INVEST/ })).toHaveCount(0)
+    await expect(itens.getByRole('row', { name: /DORNEK QA INVEST/ })).toHaveCount(0)
   })
 
   /** Critério 13, terceira frase — e o coração da entrega: o mesmo lançamento
@@ -344,7 +365,7 @@ test.describe('investimentos', () => {
     // O lançamento não sumiu do app: ele existe e saiu da conta.
     await expect(page.getByRole('row', { name: /CDB 15 DIAS/ })).toBeVisible()
     await expect(page.getByRole('row', { name: /RESGATE CDB/ })).toBeVisible()
-    await expect(page.getByRole('row', { name: /MERCADO QA INVEST/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /DORNEK QA INVEST/ })).toBeVisible()
 
     // Entrou e Saiu deixaram de somar os marcados.
     expect(valorEm(await page.getByText(/^Saiu/).first().textContent())).toBe('300,00')
@@ -391,13 +412,14 @@ test.describe('detectar investimentos', () => {
 
   const EXTRATO_NOVEMBRO: readonly Linha[] = [
     { dia: '09', valor: '-400.00', id: '21', descricao: 'CDB TESOURO DIRETO' },
-    { dia: '18', valor: '-77.00', id: '22', descricao: 'PADARIA QA INVEST' },
+    { dia: '18', valor: '-77.00', id: '22', descricao: 'MULFAZ QA INVEST' },
   ]
 
   test('a linha entra SEM categoria, porque a revisão desfaz a sugestão', async () => {
     await importar(page, EXTRATO_NOVEMBRO, '11', async (pagina) => {
       const seletor = categoriaDe(pagina, 'CDB TESOURO DIRETO', '09/11')
-      await expect(seletor.locator('option:checked')).toHaveText('Investimentos')
+      await expect(seletor.locator('option:checked')).toHaveText(FOLHA_DE_RENDA_FIXA)
+      expect(await grupoDaEscolhida(seletor)).toBe('Investimentos')
       await seletor.selectOption({ label: 'Sem categoria' })
       await expect(seletor.locator('option:checked')).toHaveText('Sem categoria')
     })

@@ -35,6 +35,16 @@ type SelectProps = {
   labelHidden?: boolean | undefined
   /** React 19: `ref` é prop normal — é por aqui que o react-hook-form registra. */
   ref?: Ref<HTMLSelectElement> | undefined
+  /** Texto FORA do componente que também descreve o campo — ele é **somado** ao
+   *  slot de mensagem, nunca o substitui.
+   *
+   *  Existe porque há descrição que não cabe dentro do `FieldShell`: a nota do
+   *  editor de categoria de `/lancamentos` explica por que a categoria atual
+   *  não está na lista, e 80 caracteres dentro do campo esticariam a coluna
+   *  (docs/DESIGN.md (h) §2). Sem ela, quem chega pelo Tab ouve o rótulo e o
+   *  placeholder, e nada explica o vazio. O `hint` continua sendo o caminho
+   *  normal — este é para o texto que precisa morar fora. */
+  'aria-describedby'?: string | undefined
 } & Omit<
   SelectHTMLAttributes<HTMLSelectElement>,
   'className' | 'style' | 'children' | 'aria-describedby' | 'aria-invalid'
@@ -59,11 +69,17 @@ export function Select({
   id,
   required,
   ref,
+  'aria-describedby': descritoPor,
   ...rest
 }: SelectProps) {
   const rawId = useId()
   const campoId = id ?? `select-${rawId.replace(/[^a-zA-Z0-9]/g, '')}`
   const mensagemId = `${campoId}-message`
+  // SOMA, não substituição: o slot de mensagem (hint/erro) vem sempre primeiro,
+  // e o que o chamador mandou entra depois. Sem `aria-describedby` recebido o
+  // resultado é exatamente o `mensagemId` de antes — a mudança é aditiva e
+  // nenhum consumidor existente muda de DOM.
+  const descricaoId = [mensagemId, descritoPor].filter(Boolean).join(' ')
 
   const baldes = agrupar(options)
 
@@ -84,7 +100,7 @@ export function Select({
           id={campoId}
           required={required}
           className={fieldStyles.control}
-          aria-describedby={mensagemId}
+          aria-describedby={descricaoId}
           aria-invalid={error ? true : undefined}
         >
           {placeholder ? <option value="">{placeholder}</option> : null}

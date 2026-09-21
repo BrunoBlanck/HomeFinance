@@ -176,15 +176,47 @@ quantidade. As mensagens dentro de `fields` são genéricas e não revelam dado 
 
 ## 5. Semente de categorias (D5)
 
-Casa nova nasce com 12 grupos pt-BR, criados **na mesma transação** que cria a casa
-(`household.EnsureDefault`, que já roda na verificação do e-mail — ADR-012), atendendo S10 do plano.
+> **Emenda de 18/09/2026 (ADR-033).** A semente deixou de ser só de grupos: ela passa a criar também
+> subcategorias e palavras-chave. O texto abaixo é o vigente; a versão de 12/09 ("12 grupos pt-BR")
+> descrevia o estado anterior.
 
-Despesa: Moradia · Alimentação · Transporte · Saúde · Educação · Lazer · Serviços · Pessoal ·
-Impostos · Outras despesas.
-Receita: Salário · Outras receitas.
+Casa nova nasce com **15 grupos, 41 subcategorias e 440 palavras-chave**, criados **na mesma
+transação** que cria a casa (`household.EnsureDefault`, que roda na verificação do e-mail — ADR-012),
+atendendo S10 do plano.
 
-Todas **editáveis e arquiváveis** — não há categoria "de sistema". A semente é idempotente: rodar
-duas vezes não duplica (a checagem é por `name_norm` dentro da casa).
+**Despesa (11 grupos):** Moradia · Alimentação · Transporte · Saúde · Educação · Lazer · **Compras** ·
+Serviços · Pessoal · Impostos · Outras despesas.
+**Receita (2):** Salário · Outras receitas.
+**Aporte (1):** Investimentos. **Resgate (1):** Resgates.
+
+**A fonte da verdade da lista é o código:** `DefaultGroups()` em
+`backend/internal/category/seed.go`. Ela não é duplicada aqui porque duplicá-la garantiria a
+divergência — a tabela é travada por teste (`seed_test.go`, `seed_corpus_test.go`) e é lá que as oito
+regras R1–R8 do ADR-033 são conferidas. `DefaultCategoryCount()` devolve grupos **mais** folhas (56),
+que é o número que os testes comparam com `CountAll`.
+
+Regras da semente, todas normativas:
+
+- **A folha herda a natureza do grupo** (invariante 4 desta spec). `DefaultLeaf` não tem campo
+  `Kind`, então a divergência nem é representável.
+- **"Outras despesas" fica sem filhas e sem palavras**, de propósito: é o balde residual, e grupo com
+  filha ativa não recebe lançamento nem palavra-chave (spec 0005 §12/§13).
+- **Folhas e palavras só nascem junto com o grupo que a própria execução criou.** Grupo que a casa já
+  tem — com qualquer natureza, com ou sem filhas, com ou sem palavras — fica **intocado**.
+- **Palavra já usada por outra categoria da casa é pulada em silêncio**, decidida em memória antes de
+  qualquer escrita; as posições restantes são renumeradas 0..n-1.
+- Todas **editáveis, arquiváveis e excluíveis** — não há categoria "de sistema".
+- A semente é **idempotente** (a checagem é por `name_norm` de grupo ATIVO dentro da casa), mas isso
+  é **defesa em profundidade**, não um caminho de rotina: ver abaixo.
+
+### ⚠️ Quando a semente roda — correção
+
+A semente roda **uma vez por casa, na criação dela**: na verificação do e-mail e, como reparo, no
+login de usuário verificado que não tem casa nenhuma. **Ela NÃO roda a cada login**, porque
+`household.EnsureDefault` devolve cedo quando o usuário já tem casa. Consequência prática:
+**casa existente não recebe grupo novo** quando a semente cresce. As casas anteriores a 17/09/2026
+não receberam "Investimentos"/"Resgates", e nenhuma casa anterior a 18/09/2026 recebe as
+subcategorias. Um backfill, se vier, será ação explícita e **opt-in** (backlog do ROADMAP).
 
 ---
 

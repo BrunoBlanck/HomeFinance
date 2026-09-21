@@ -1,0 +1,300 @@
+@layer components {
+  /* O mesmo recuo das seções 1 e 2: `Panel padding="none"` e o espaço
+     declarado aqui, uma vez, para todos os blocos. */
+  .secao {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-4);
+  }
+
+  .cabecalho {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-18);
+    font-weight: 600;
+    color: var(--ink);
+
+    /* O foco chega aqui por "Ir para Reprocessar" (seção 2); o anel só
+       aparece para quem navega por teclado, nunca no clique. */
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .apoio {
+    max-inline-size: 72ch;
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  /* Os meses e a ordem — a explicação que fica de pé enquanto não há prévia.
+     Duas linhas de prosa, sem caixa: é o que a seção faz, dito uma vez. */
+  .explicacao {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-inline-size: 72ch;
+  }
+
+  /* Os meses são a resposta a "o que vai ser reprocessado": tinta cheia, no
+     tamanho de leitura. */
+  .meses {
+    font-size: var(--text-15);
+    line-height: 1.5;
+    color: var(--ink);
+  }
+
+  .ordem {
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  .acoes {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  /* A frase consolidada — e a de carregamento, e a da janela que mudou: um nó
+     só, em tinta cheia, porque é o resumo do que a pessoa está prestes a
+     aplicar. `tabular-nums` para os números não dançarem entre prévias. */
+  .totais {
+    max-inline-size: 72ch;
+    font-size: var(--text-15);
+    line-height: 1.5;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A tabela por mês sangra até a borda do painel, como os blocos da seção 2:
+     ela é a superfície da seção, não um cartão dentro dela. */
+  .tabela {
+    margin-inline: calc(var(--space-4) * -1);
+    border-block-start: 1px solid var(--border);
+  }
+
+  .numero {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A nota da sobreposição: apoio, abaixo da tabela, só quando cabe. */
+  .nota {
+    max-inline-size: 72ch;
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  /* O estado de cada passo é a PALAVRA. Peso e tinta são reforço: o que está
+     acontecendo agora e o que falhou ficam em tinta cheia; o que espera, em
+     tinta apagada. Nenhuma cor cromática — em `grayscale(1)` nada se perde. */
+  .estado {
+    color: var(--ink-muted);
+
+    &[data-estado="feito"],
+    &[data-estado="nao_aplicado"],
+    &[data-estado="sem_resposta"],
+    &[data-estado="nao_chegou_a_rodar"] {
+      color: var(--ink);
+    }
+
+    &[data-estado="em_andamento"] {
+      color: var(--ink);
+      font-weight: 600;
+    }
+  }
+
+  /* O registro do progresso: uma frase por chamada concluída, uma por linha.
+     `<output>` só admite conteúdo de frase, então cada linha é um `<span>`
+     em bloco. A frase final ganha tinta cheia; as outras são o rastro. */
+  .log {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+
+    &:empty {
+      display: none;
+    }
+  }
+
+  .linhaDoLog {
+    display: block;
+
+    &[data-final] {
+      margin-block-start: var(--space-1);
+      font-size: var(--text-15);
+      color: var(--ink);
+    }
+  }
+
+  /* O corpo do aviso de parada: três parágrafos, separados por espaço, não
+     por linha em branco dupla. */
+  .corpoDoAviso {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  /* --- o resultado ------------------------------------------------------ */
+
+  .resultado {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* Uma <dl> de até duas linhas, NÃO dois cartões com número gigante — a
+     mesma forma do relatório da seção 2. */
+  .lista {
+    display: flex;
+    flex-direction: column;
+    max-inline-size: 32rem;
+  }
+
+  .linha {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding-block: var(--space-2);
+    font-size: var(--text-15);
+  }
+
+  .linha + .linha {
+    border-block-start: 1px solid var(--border);
+  }
+
+  .linha dt {
+    color: var(--ink-muted);
+  }
+
+  .linha dd {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .links {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-size: var(--text-15);
+  }
+
+  .separador {
+    color: var(--ink-muted);
+  }
+
+  /* --- os sem par ------------------------------------------------------- */
+
+  /* <details> nativo: fechado, é auditoria. */
+  .detalhes {
+    border-block-start: 1px solid var(--border);
+    padding-block-start: var(--space-3);
+  }
+
+  .sumario {
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+
+    &:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+  }
+
+  .detalhes[open] .sumario {
+    margin-block-end: var(--space-3);
+  }
+
+  .detalhes[open] .apoio {
+    margin-block-end: var(--space-3);
+  }
+
+  /* A lista dos sem par ganha a própria moldura: é uma nota dentro da prévia,
+     não a superfície da seção. */
+  .moldura {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .conta {
+    color: var(--ink);
+  }
+
+  /* Duas linhas antes do corte: "Pix enviado - BRUNO RIBEIRO BLANCK" numa
+     linha só viraria "Pix enviado - BRU…" e deixaria de identificar o
+     lançamento, que é a razão de ele estar na lista. */
+  .descricao {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    color: var(--ink);
+  }
+
+  .semDescricao {
+    color: var(--ink-muted);
+  }
+
+  /* Segunda linha da descrição: o motivo e, abaixo de 40rem, a conta que a
+     coluna escondida deixou de mostrar. */
+  .apoioDaLinha {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1);
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  /* Só existe onde o DataTable escondeu a coluna Conta. Esconder coluna só é
+     honesto quando o conteúdo reaparece. */
+  .contaEstreita {
+    display: none;
+  }
+
+  .motivo {
+    color: var(--ink-muted);
+  }
+
+  .corte {
+    font-size: var(--text-13);
+    color: var(--ink-muted);
+  }
+
+  @media (max-width: 40rem) {
+    .contaEstreita {
+      display: flex;
+      flex-basis: 100%;
+    }
+  }
+}

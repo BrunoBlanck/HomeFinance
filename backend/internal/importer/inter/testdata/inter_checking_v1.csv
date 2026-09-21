@@ -1,0 +1,13 @@
+ Extrato Conta Corrente 
+Conta ;100000001
+Período ;01/08/2026 a 31/08/2026
+Saldo ;42,17
+
+Data Lançamento;Histórico;Descrição;Valor;Saldo
+27/08/2026;Pagamento efetuado;ADMINISTRADORA EXEMPLO S/A;-210,78;42,17
+25/08/2026;Pix enviado ;Receita Federal;-700,00;252,95
+25/08/2026;Pix enviado ;Fulano de Tal Silva;-9.800,00;952,95
+19/08/2026;Pagamento efetuado;ESCRITORIO EXEMPLO LTDA;-350,00;10.752,95
+19/08/2026;Pix enviado ;Receita Federal;-160,25;11.102,95
+19/08/2026;Pix enviado ;Fulano de Tal Silva;-1.250,50;11.263,20
+18/08/2026;Pix recebido;Empresa Exemplo Ltda;12.500,00;12.513,70

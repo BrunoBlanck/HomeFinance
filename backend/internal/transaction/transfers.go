@@ -110,13 +110,33 @@ func (s *Service) ListTransfers(ctx context.Context, ator Actor, in TransferList
 	// consulta. Conta da vizinha devolveria uma lista vazia — o que não vaza
 	// dado, mas não é a resposta certa: id que não é meu é 404, igual a id
 	// que não existe (S1).
-	for _, contaID := range []string{in.AccountID, in.CounterpartAccountID} {
-		if contaID == "" {
+	//
+	// ⚠️ E o que segue daqui para baixo é o id CANÔNICO — `conta.ID`, o que o
+	// banco devolveu —, nunca a string do cliente. Esta rota é o caso mais
+	// agudo do projeto: a posse é conferida em SQL (`WHERE id = ?`, cuja
+	// igualdade vem da COLLATION da coluna, insensível a caixa no MySQL 8 e a
+	// espaço à direita no MSSQL), mas o filtro é aplicado em GO — paresDoMes
+	// compara `a != accountID` byte a byte, e saldosNoFimDoMes usa o id como
+	// CHAVE DE MAPA (`nomes`, `abertura`). Com a string do cliente, o `ByID`
+	// aceitaria `"<UUID>"`, nenhum par casaria, nenhum nome seria encontrado —
+	// e a tela mostraria "nenhuma transferência neste mês" para uma conta
+	// cheia delas, sem erro nenhum.
+	contaDoFiltro, contraparteDoFiltro := in.AccountID, in.CounterpartAccountID
+	for _, alvo := range []*string{&contaDoFiltro, &contraparteDoFiltro} {
+		if *alvo == "" {
 			continue
 		}
-		if _, err := s.contaDaCasa(ctx, householdID, contaID); err != nil {
+		conta, err := s.contaDaCasa(ctx, householdID, *alvo)
+		if err != nil {
 			return TransferListView{}, err
 		}
+		*alvo = conta.ID
+	}
+	// Reconferência da igualdade sobre os ids CANÔNICOS: a recusa acima
+	// comparou as strings do cliente, e com a caixa trocada `"<UUID>"` e
+	// `"<uuid>"` passariam por ela sendo a mesma conta para o banco.
+	if contraparteDoFiltro != "" && contraparteDoFiltro == contaDoFiltro {
+		return TransferListView{}, ErrSameAccountFilter
 	}
 
 	cursor, err := ParseCursor(in.Cursor)
@@ -140,8 +160,8 @@ func (s *Service) ListTransfers(ctx context.Context, ator Actor, in TransferList
 
 	filtro := TransferFilter{
 		CompetenceMonth:      in.Month,
-		AccountID:            in.AccountID,
-		CounterpartAccountID: in.CounterpartAccountID,
+		AccountID:            contaDoFiltro,
+		CounterpartAccountID: contraparteDoFiltro,
 	}
 	if !cursor.OccurredOn.IsZero() {
 		filtro.Cursor = &cursor
@@ -151,12 +171,12 @@ func (s *Service) ListTransfers(ctx context.Context, ator Actor, in TransferList
 		return TransferListView{}, err
 	}
 
-	pares, err := s.paresDoMes(ctx, householdID, in.Month, in.AccountID, in.CounterpartAccountID, nomes)
+	pares, err := s.paresDoMes(ctx, householdID, in.Month, contaDoFiltro, contraparteDoFiltro, nomes)
 	if err != nil {
 		return TransferListView{}, err
 	}
 
-	saldos, err := s.saldosNoFimDoMes(ctx, householdID, primeiroDia, in.AccountID, in.CounterpartAccountID, pares, nomes, abertura)
+	saldos, err := s.saldosNoFimDoMes(ctx, householdID, primeiroDia, contaDoFiltro, contraparteDoFiltro, pares, nomes, abertura)
 	if err != nil {
 		return TransferListView{}, err
 	}

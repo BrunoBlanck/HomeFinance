@@ -149,11 +149,42 @@ export type CategoryReport = ApiSchemas['CategoryReport']
 export type CategoryReportGroup = ApiSchemas['CategoryReportGroup']
 export type CategoryReportChild = ApiSchemas['CategoryReportChild']
 
+/** `'credit' | 'debit'` — o recorte de CONTAS do relatório por categoria
+ *  (ADR-032): `credit` são as contas de cartão de crédito, `debit` todas as
+ *  demais. Ausente = todas as contas.
+ *
+ *  Derivado do eco `accountGroup` da resposta (que é o mesmo enum do parâmetro
+ *  de query), sem o `null` do "todas": o `null` é o jeito da RESPOSTA dizer
+ *  "sem recorte"; no pedido, "sem recorte" é a ausência da chave, que é a URL
+ *  canônica (o servidor aceita `accountGroup=` vazio com o mesmo significado,
+ *  mas o cliente não tem por que escrever uma chave que não recorta nada).
+ *  Um valor novo no contrato aparece aqui sozinho
+ *  e quebra a compilação do `Record` que o traduz da palavra da URL. */
+export type AccountGroup = NonNullable<CategoryReport['accountGroup']>
+
 /** Participação em pontos-base (`0..10000`, 1 bp = 0,01 %), apurada no
  *  **servidor** pelo método do maior resto (ADR-027c). O cliente só formata:
  *  é isso que faz as linhas da tabela somarem `100,00%` sem nota de
  *  arredondamento. */
 export type BasisPoints = ApiSchemas['BasisPoints']
+
+// ------------------------------------ painel: resumo do mês (spec 0008)
+
+/** O que `GET /dashboard?month=` devolve: os três números do mês, as contagens
+ *  que os explicam e os dois contadores de estado vazio.
+ *
+ *  Dois campos merecem nota, e as duas notas são sobre **não recalcular nada
+ *  aqui**:
+ *
+ *  - `investmentNetCents` é o líquido **com sinal** (aportes − resgates), e é
+ *    um dos pouquíssimos campos de dinheiro do contrato sem `minimum: 0`. Ele
+ *    chega pronto: subtrair no cliente criaria uma segunda fonte para o mesmo
+ *    número (ADR-003, e a lição de 18/09/2026 em `LICOES-FRONTEND.md`).
+ *  - `creditCardAccountCount` e `investmentCategoryCount` existem para a tela
+ *    distinguir "não tem cartão cadastrado" de "tem cartão e não gastou" **sem
+ *    buscar `/accounts` nem `/categories`** — a faixa se monta com um pedido de
+ *    rede e só um (spec 0008, aceite 18). */
+export type DashboardSummary = ApiSchemas['DashboardSummary']
 
 // ------------------------------- categorizar automaticamente (spec 0005)
 
@@ -197,6 +228,17 @@ export type UpdateTransactionCategoryInput = ApiSchemas['UpdateTransactionCatego
  *  cair no `else` e exibir uma despesa como receita. */
 export type TransactionKind = ApiSchemas['TransactionKind']
 
+/** `'income' | 'expense' | 'transfer' | 'investment'` — o **agrupamento** do
+ *  filtro de tipo de `GET /transactions` (spec 0004 §12, emenda E2d).
+ *
+ *  Não é `TransactionKind`: `investment` não é um `kind` (ADR-029b), é o
+ *  recorte das linhas cuja categoria tem natureza `investment`/`redemption`. A
+ *  allowlist é fechada e **sensível a caixa**, e a ausência da chave é "Tudo" —
+ *  o valor `all` não existe e responde 400. A tradução da palavra da URL
+ *  (`?tipo=despesas`) para este valor é da tela, e mora num lugar só
+ *  (`grupoDeTipo`, em `features/transactions/api/transactions.ts`). */
+export type TransactionKindGroup = ApiSchemas['TransactionKindGroup']
+
 export type TransactionSource = ApiSchemas['TransactionSource']
 
 /** Mês do app, `AAAA-MM` — sempre **competência** (ADR-023c). */
@@ -226,5 +268,55 @@ export type StatementConfirmation = ApiSchemas['StatementConfirmation']
 export type ImportResult = ApiSchemas['ImportResult']
 export type ImportDocKind = ApiSchemas['ImportDocKind']
 
-/** `'c6' | 'nubank' | 'other'` — allowlist fechada, nada de texto livre. */
+/** `'c6' | 'inter' | 'nubank' | 'other'` — allowlist fechada, nada de texto livre. */
 export type Institution = ApiSchemas['Institution']
+
+// -------------------------------------------- menu IA: exportar (spec 0010)
+
+/** O que `GET /ai/export-prompt` devolve: o texto pronto em Markdown, o eco da
+ *  janela, o instante da geração e as contagens.
+ *
+ *  **A tela não remonta o prompt.** O contrato entrega o texto e nada além
+ *  dele — nenhum lançamento, nenhum valor solto, nenhuma estrutura para o
+ *  cliente concatenar. É o que faz "Copiar" e "Baixar" entregarem exatamente o
+ *  que está na tela, byte a byte (aceite 49 da spec 0010): existe **um** texto,
+ *  e ele veio do servidor. */
+export type AiExportPrompt = ApiSchemas['AiExportPrompt']
+
+/** As contagens ao lado do prompt. Elas existem para a pessoa ver o TAMANHO do
+ *  que está prestes a colar em outro lugar **antes** de colar — não são enfeite
+ *  de painel, são parte do consentimento informado (spec 0010 §8.1). */
+export type AiExportStats = ApiSchemas['AiExportStats']
+
+// ---------------------------------- menu IA: importar (spec 0010 §4, E9b)
+
+/** O corpo que o frontend manda nas **duas** rotas (`preview` e `confirm`):
+ *  o JSON da IA como veio, a janela de trabalho e, só no confirm, os `ref`
+ *  das categorias desmarcadas. Os corpos são idênticos de propósito — é o que
+ *  torna literal a promessa de que o confirm revalida tudo do zero. */
+export type KeywordImportEnvelope = ApiSchemas['KeywordImportEnvelope']
+
+/** O JSON da IA. A tela só garante que é JSON e objeto; quem valida campo a
+ *  campo é o servidor (`additionalProperties: false` em todo nível). */
+export type KeywordImportPayload = ApiSchemas['KeywordImportPayload']
+
+/** O mesmo relatório nas duas rotas: na prévia, o que **entraria**; no
+ *  confirm, o que **de fato entrou**. A tela desenha um bloco só. */
+export type KeywordImportReport = ApiSchemas['KeywordImportReport']
+export type KeywordImportTotals = ApiSchemas['KeywordImportTotals']
+export type KeywordImportNewCategory = ApiSchemas['KeywordImportNewCategory']
+export type KeywordImportItem = ApiSchemas['KeywordImportItem']
+export type KeywordImportItemType = ApiSchemas['KeywordImportItemType']
+export type KeywordImportSkippedKeyword = ApiSchemas['KeywordImportSkippedKeyword']
+export type KeywordImportRejectedKeyword = ApiSchemas['KeywordImportRejectedKeyword']
+
+/** Os conjuntos **fechados** de motivo (§§4.2–4.3 da spec 0010). Viram FRASE
+ *  na tela por `Record` exaustivo: um motivo novo no contrato é erro de
+ *  compilação em quem escolhe a frase, nunca `keyword_taken` cru na tela. */
+export type KeywordImportRejectReason = ApiSchemas['KeywordImportRejectReason']
+export type KeywordImportSkipReason = ApiSchemas['KeywordImportSkipReason']
+export type NewCategoryOutcome = ApiSchemas['NewCategoryOutcome']
+
+/** `grupo > folha` normalizado — o `ref` estável entre prévia e confirmação.
+ *  O cliente só devolve, em `skipNewCategories`, o que o servidor mandou. */
+export type CategoryPathRef = ApiSchemas['CategoryPathRef']

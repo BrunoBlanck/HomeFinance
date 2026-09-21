@@ -13,12 +13,19 @@ import (
 // A semente respeita MaxPerHousehold — achado A3 da segunda revisão de
 // segurança.
 //
-// Ela não ser exceção ao teto importa porque roda no auto-reparo do LOGIN: uma
-// casa exatamente em 200 recebia os dois grupos do ADR-029a e ficava com 202. A
-// partir daí a taxonomia passa do teto que o resto do código assume, e
-// `/investments/detect` com `overwriteCategorized` responde 500 PERMANENTE
+// A justificativa original dizia "porque ela roda no auto-reparo do LOGIN".
+// Isso está ERRADO e foi corrigido no ADR-033: `household.EnsureDefault`
+// devolve cedo quando o usuário já tem casa, então a semente roda UMA vez por
+// casa, na criação. A trava continua valendo, e por um motivo que não depende
+// daquela frase: a semente cresceu de 14 para 56 categorias (ADR-033), e uma
+// função que popula sem olhar o teto empurraria a casa para além dos 200 que o
+// resto do código assume. A partir daí `/investments/detect` com
+// `overwriteCategorized` responde 500 PERMANENTE
 // (transaction.ErrTooManyCategories) — sem nenhuma ação de autoatendimento,
 // porque a pessoa não tem como saber que precisa excluir uma categoria.
+//
+// E parar em SILÊNCIO, sem falhar: um erro aqui derrubaria a criação da casa
+// inteira por causa de uma categoria sugerida.
 
 // encherTaxonomia cria n grupos com nomes que NÃO colidem com os da semente,
 // para o teste medir o teto e não a idempotência por nome.
@@ -38,9 +45,9 @@ func TestSementeNaoUltrapassaOTetoDaCasa(t *testing.T) {
 
 	encherTaxonomia(t, svc, minhaCasa, category.MaxPerHousehold)
 
-	// É o auto-reparo do login: nem falha, nem estoura.
+	// Casa cheia: nem falha, nem estoura.
 	require.NoError(t, svc.SeedDefaults(ctx, minhaCasa),
-		"a semente roda no caminho do LOGIN: falhar aqui trancaria a entrada de quem tem a taxonomia cheia")
+		"a semente roda dentro da criação da casa: falhar aqui derrubaria o cadastro por causa de uma categoria sugerida")
 
 	total, err := repo.CountAll(ctx, minhaCasa)
 	require.NoError(t, err)
@@ -65,8 +72,8 @@ func TestSementeParaExatamenteNaUltimaVaga(t *testing.T) {
 	assert.EqualValues(t, category.MaxPerHousehold, total)
 }
 
-// Casa nova continua recebendo a semente inteira: o teto é 200 e os grupos são
-// catorze — o conserto do A3 não pode custar a razão de a semente existir.
+// Casa nova continua recebendo a semente inteira: o teto é 200 e a semente são
+// 56 categorias — o conserto do A3 não pode custar a razão de a semente existir.
 func TestCasaNovaContinuaRecebendoASementeInteira(t *testing.T) {
 	t.Parallel()
 
@@ -78,5 +85,5 @@ func TestCasaNovaContinuaRecebendoASementeInteira(t *testing.T) {
 
 	total, err := repo.CountAll(ctx, minhaCasa)
 	require.NoError(t, err)
-	assert.EqualValues(t, len(category.DefaultGroups()), total)
+	assert.EqualValues(t, category.DefaultCategoryCount(), total)
 }

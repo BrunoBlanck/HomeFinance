@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brunorblanck/homefinance/backend/internal/civil"
+	"github.com/brunorblanck/homefinance/backend/internal/id"
 )
 
 // O cursor da listagem, na forma em que ele trafega.
@@ -32,9 +33,6 @@ const (
 	// maxCursorLen espelha o teto do contrato (pattern de 1 a 256 caracteres).
 	// Decodificar antes de medir seria alocar o que o cliente mandar.
 	maxCursorLen = 256
-
-	// uuidLen é o comprimento canônico de um UUID com hífens.
-	uuidLen = 36
 )
 
 // EncodeCursor devolve a forma textual do cursor.
@@ -97,28 +95,13 @@ func ParseCursor(raw string) (Cursor, error) {
 // looksLikeUUID confere a FORMA canônica 8-4-4-4-12 em hexadecimal minúsculo ou
 // maiúsculo.
 //
+// Delega para id.IsCanonical: a regra é a MESMA que a borda de escrita aplica
+// aos ids de conta (ver o comentário de doc de lá), e duas cópias da mesma
+// regra divergem na primeira vez que uma delas for corrigida.
+//
 // Não é uuid.Parse de propósito: aquele aceita variantes (com chaves, sem
 // hífen, com urn:), e aceitar variante aqui significaria que a mesma linha tem
 // mais de um cursor válido. Uma forma só.
 func looksLikeUUID(s string) bool {
-	if len(s) != uuidLen {
-		return false
-	}
-	for i := range uuidLen {
-		c := s[i]
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if c != '-' {
-				return false
-			}
-			continue
-		}
-		switch {
-		case c >= '0' && c <= '9':
-		case c >= 'a' && c <= 'f':
-		case c >= 'A' && c <= 'F':
-		default:
-			return false
-		}
-	}
-	return true
+	return id.IsCanonical(s)
 }

@@ -35,12 +35,21 @@ const MES = '2026-08'
  *  Gerar o conteúdo no próprio teste evita acoplar o frontend ao caminho das
  *  fixtures do backend — e deixa à vista, para quem lê, exatamente qual dado
  *  entra e qual resultado ele deve produzir. O formato é o do extrato Nubank
- *  (`Data,Valor,Identificador,Descrição`, `DD/MM/YYYY`, negativo é saída). */
+ *  (`Data,Valor,Identificador,Descrição`, `DD/MM/YYYY`, negativo é saída).
+ *
+ *  **Os nomes são inventados de propósito** (ADR-033, 18/09/2026). Eram
+ *  `Mercado`, `Farmacia`, `Salario` e `Posto`; com a semente de categorias,
+ *  casa nova nasce reconhecendo as quatro palavras e as quatro linhas entrariam
+ *  JÁ categorizadas. Isso quebraria `relatorio-por-categoria.spec.ts`, que lê
+ *  este mês e precisa de uma lacuna "Sem categoria" para categorizar à mão.
+ *  `Dornek`, `Vrandix`, `Tarvin` e `Mulfaz` foram conferidos contra o motor
+ *  real (`internal/textmatch` + `internal/category/seed.go`): nenhum alcança o
+ *  limiar de 80 em nenhum dos dois lados do dinheiro. */
 const LINHAS = [
-  { dia: '03', valor: '-50.00', id: '01', descricao: 'Mercado Exemplo' },
-  { dia: '07', valor: '-19.90', id: '02', descricao: 'Farmacia Exemplo' },
-  { dia: '12', valor: '1200.00', id: '03', descricao: 'Salario Exemplo' },
-  { dia: '20', valor: '-33.00', id: '04', descricao: 'Posto Exemplo' },
+  { dia: '03', valor: '-50.00', id: '01', descricao: 'Dornek Exemplo' },
+  { dia: '07', valor: '-19.90', id: '02', descricao: 'Vrandix Exemplo' },
+  { dia: '12', valor: '1200.00', id: '03', descricao: 'Tarvin Exemplo' },
+  { dia: '20', valor: '-33.00', id: '04', descricao: 'Mulfaz Exemplo' },
 ]
 
 function extratoCSV(): Buffer {
@@ -119,22 +128,22 @@ test.describe('importação', () => {
     // por substring deixaria passar uma tela que comunica o sinal só por cor —
     // que é justamente o que o projeto proíbe.
     await expect(
-      page.getByRole('row', { name: /Mercado Exemplo/ }).getByText('R$ 50,00 negativos', { exact: true }),
+      page.getByRole('row', { name: /Dornek Exemplo/ }).getByText('R$ 50,00 negativos', { exact: true }),
     ).toBeAttached()
     await expect(
-      page.getByRole('row', { name: /Salario Exemplo/ }).getByText('R$ 1.200,00 positivos', { exact: true }),
+      page.getByRole('row', { name: /Tarvin Exemplo/ }).getByText('R$ 1.200,00 positivos', { exact: true }),
     ).toBeAttached()
     // E o visível traz o sinal escrito, não só a cor.
-    await expect(page.getByRole('row', { name: /Salario Exemplo/ }).getByText('+1.200,00')).toBeVisible()
+    await expect(page.getByRole('row', { name: /Tarvin Exemplo/ }).getByText('+1.200,00')).toBeVisible()
 
     // --- excluir -----------------------------------------------------------
-    await page.getByRole('button', { name: /^Excluir Posto Exemplo,/ }).click()
+    await page.getByRole('button', { name: /^Excluir Mulfaz Exemplo,/ }).click()
     await expect(page.getByRole('heading', { level: 2, name: 'Excluir este lançamento?' })).toBeVisible()
     await page.getByRole('button', { name: 'Excluir lançamento' }).click()
 
-    await expect(page.getByRole('row', { name: /Posto Exemplo/ })).toHaveCount(0)
+    await expect(page.getByRole('row', { name: /Mulfaz Exemplo/ })).toHaveCount(0)
     // E os outros três continuam lá: a exclusão é de UM lançamento.
-    await expect(page.getByRole('row', { name: /Mercado Exemplo/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /Dornek Exemplo/ })).toBeVisible()
   })
 
   test('reimportar o mesmo arquivo não deixa nada entrar', async ({ page }) => {
@@ -171,9 +180,9 @@ test.describe('importação', () => {
 
     await page.goto(`/lancamentos?mes=${MES}`)
     // Continuam sendo as MESMAS três linhas: nenhuma duplicata nasceu.
-    await expect(page.getByRole('row', { name: /Mercado Exemplo/ })).toHaveCount(1)
-    await expect(page.getByRole('row', { name: /Farmacia Exemplo/ })).toHaveCount(1)
-    await expect(page.getByRole('row', { name: /Salario Exemplo/ })).toHaveCount(1)
+    await expect(page.getByRole('row', { name: /Dornek Exemplo/ })).toHaveCount(1)
+    await expect(page.getByRole('row', { name: /Vrandix Exemplo/ })).toHaveCount(1)
+    await expect(page.getByRole('row', { name: /Tarvin Exemplo/ })).toHaveCount(1)
   })
 })
 

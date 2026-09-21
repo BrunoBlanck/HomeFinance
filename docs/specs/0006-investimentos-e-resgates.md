@@ -120,6 +120,11 @@ mês" só se responde somando à mão.
    casa — ADR-019).
 2. **No mês**: aportes (soma e contagem) e resgates (soma e contagem), lado a lado. Sem saldo, sem
    líquido, sem patrimônio.
+   > **Emenda de 18/09/2026 — escopo desta regra.** Ela vale para **esta tela**, e continua valendo
+   > por decisão explícita do usuário na mesma data. O **painel** (`/`) passa a exibir o investimento
+   > do mês como UM número líquido (aportes − resgates, com sinal, podendo ser negativo), em schema
+   > próprio — o `InvestmentTotals` desta rota **não** ganha líquido. Ver `LICOES-FRONTEND.md` e
+   > `LICOES-BACKEND.md`.
 3. **No ano**: os mesmos dois números, de 1º de janeiro até o mês selecionado, inclusive ("no ano, até
    setembro"). Ano civil da casa.
 4. **Últimos 12 meses**: série terminando no mês selecionado, em barras SVG próprias (ADR-021), com a

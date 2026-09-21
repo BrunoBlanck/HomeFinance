@@ -25,7 +25,7 @@ func TestByCategoryDescartaAporteDosTotaisEDasLinhas(t *testing.T) {
 	investimentos := a.categoria(minhaCasa, "g-invest", "Investimentos", category.KindInvestment, nil, false)
 	cdb := a.categoria(minhaCasa, "f-cdb", "CDB", category.KindInvestment, ptr(investimentos.ID), false)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(mercado.ID), 300_00, 3),
 		linha(ptr(investimentos.ID), 500_00, 1),
 		linha(ptr(cdb.ID), 2_000_00, 1),
@@ -51,7 +51,7 @@ func TestByCategoryDescartaResgateDoRelatorioDeReceitas(t *testing.T) {
 	salario := a.categoria(minhaCasa, "g-salario", "Salário", category.KindIncome, nil, false)
 	resgates := a.categoria(minhaCasa, "g-resgate", "Resgates", category.KindRedemption, nil, false)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(salario.ID), 5_000_00, 1),
 		linha(ptr(resgates.ID), 500_00, 1),
 	}
@@ -76,7 +76,7 @@ func TestByCategoryDescartaSoALinhaMarcadaEMantemOResto(t *testing.T) {
 	luz := a.categoria(minhaCasa, "f-luz", "Luz", category.KindExpense, ptr(casa.ID), false)
 	marcada := a.categoria(minhaCasa, "f-marcada", "Aporte", category.KindInvestment, ptr(casa.ID), false)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(casa.ID), 100_00, 1),
 		linha(ptr(luz.ID), 200_00, 2),
 		linha(ptr(marcada.ID), 2_000_00, 1),
@@ -103,7 +103,7 @@ func TestByCategoryDescartaMarcadaArquivada(t *testing.T) {
 	mercado := a.categoria(minhaCasa, "g-mercado", "Mercado", category.KindExpense, nil, false)
 	poupanca := a.categoria(minhaCasa, "g-poupanca", "Poupança", category.KindInvestment, nil, true)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(mercado.ID), 300_00, 3),
 		linha(ptr(poupanca.ID), 1_000_00, 1),
 	}
@@ -124,7 +124,7 @@ func TestByCategoryNaoMexeNoBaldeSemCategoria(t *testing.T) {
 	a := novoAmbiente(t)
 
 	investimentos := a.categoria(minhaCasa, "g-invest", "Investimentos", category.KindInvestment, nil, false)
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(nil, 150_00, 4),
 		linha(ptr(investimentos.ID), 2_000_00, 1),
 	}
@@ -147,7 +147,7 @@ func TestByCategoryComTudoMarcadoRespondeVazioBemFormado(t *testing.T) {
 	a := novoAmbiente(t)
 
 	investimentos := a.categoria(minhaCasa, "g-invest", "Investimentos", category.KindInvestment, nil, false)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(investimentos.ID), 2_000_00, 1)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(investimentos.ID), 2_000_00, 1)}
 
 	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)

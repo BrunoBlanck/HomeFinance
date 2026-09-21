@@ -119,8 +119,40 @@ func TestAutoCategorizeSexagesimaPrimeiraChamadaNaHoraE429ENaoEscreve(t *testing
 	assert.Equal(t, http.StatusTooManyRequests, amb.chamarNaCadeia(t, h, minhaCasa, previa).Code)
 
 	// Nada sensível no log em nenhum dos caminhos.
+	//
+	// A conferência roda sobre o log SEM o carimbo de tempo (semRelogio): o
+	// `"time"` do slog é RFC3339 com nanossegundos, e uma fração como
+	// `.1000123` casa o literal "1000" por acaso — falha medida em 18/09/2026,
+	// numa execução com -race do pacote inteiro. Um teste de vazamento que
+	// acusa o próprio relógio ensina a equipe a ignorá-lo, que é o pior
+	// desfecho possível para uma asserção de segurança. O que o campo de tempo
+	// não pode conter, por construção, é dado da casa.
+	semTempo := semRelogio(amb.logs.String())
 	for _, proibido := range []string{"Segredo", "supermercado", "15007", "1000", alvo.ID} {
-		assert.NotContains(t, amb.logs.String(), proibido, "vazou no log: %q", proibido)
+		assert.NotContains(t, semTempo, proibido, "vazou no log: %q", proibido)
+	}
+}
+
+// semRelogio apaga o campo `"time":"…"` de cada linha do log estruturado.
+//
+// Ele existe para que asserções de VAZAMENTO por substring numérica não sejam
+// decididas pelo relógio da máquina. Nada mais é removido: a mensagem, os
+// atributos e os valores continuam inteiros sob os olhos do teste.
+func semRelogio(logs string) string {
+	var b strings.Builder
+	resto := logs
+	for {
+		i := strings.Index(resto, `"time":"`)
+		if i < 0 {
+			b.WriteString(resto)
+			return b.String()
+		}
+		b.WriteString(resto[:i])
+		fim := strings.Index(resto[i+len(`"time":"`):], `"`)
+		if fim < 0 {
+			return b.String()
+		}
+		resto = resto[i+len(`"time":"`)+fim+1:]
 	}
 }
 

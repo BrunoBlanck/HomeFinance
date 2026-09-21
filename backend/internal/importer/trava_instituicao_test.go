@@ -113,7 +113,7 @@ func TestOsDoisVocabulariosDeInstituicaoConferem(t *testing.T) {
 
 	// E o caminho de volta: todo emissor conhecido pela importação precisa ser
 	// marcável na conta.
-	for _, emissor := range []importer.Institution{importer.InstitutionNubank, importer.InstitutionC6} {
+	for _, emissor := range []importer.Institution{importer.InstitutionNubank, importer.InstitutionC6, importer.InstitutionInter} {
 		assert.True(t, account.ValidInstitution(string(emissor)),
 			"emissor %q não é marcável em conta nenhuma", emissor)
 	}

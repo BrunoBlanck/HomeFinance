@@ -34,7 +34,7 @@ func TestByCategoryPaiArquivadoMantemFilhaNoGrupo(t *testing.T) {
 
 	pai := a.categoria(minhaCasa, "g-pai", "Transporte", category.KindExpense, nil, true)
 	filha := a.categoria(minhaCasa, "f-viva", "Combustível", category.KindExpense, ptr(pai.ID), false)
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(filha.ID), 30_000, 3),
 		linha(ptr(pai.ID), 10_000, 1),
 	}
@@ -64,7 +64,7 @@ func TestByCategoryGrupoComMuitasFilhas(t *testing.T) {
 
 	const nFilhas = 180
 	pai := a.categoria(minhaCasa, "g-pai", "Casa", category.KindExpense, nil, false)
-	rows := []report.CategoryTotal{linha(ptr(pai.ID), 777, 1)}
+	rows := []report.CategoryAccountTotal{linha(ptr(pai.ID), 777, 1)}
 	var esperado int64 = 777
 	for i := range nFilhas {
 		id := fmt.Sprintf("f-%03d", i)
@@ -110,9 +110,9 @@ func TestByCategoryEmpatesSaoDeterministicos(t *testing.T) {
 
 	// Três grupos com valor e contagem idênticos (desempate cai no nome) e,
 	// dentro do primeiro, três filhas também idênticas.
-	montar := func() ([]report.CategoryTotal, *ambiente) {
+	montar := func() ([]report.CategoryAccountTotal, *ambiente) {
 		a := novoAmbiente(t)
-		var rows []report.CategoryTotal
+		var rows []report.CategoryAccountTotal
 		for _, nome := range []string{"Zebra", "Alface", "Milho"} {
 			id := "g-" + strings.ToLower(nome)
 			a.categoria(minhaCasa, id, nome, category.KindExpense, nil, false)
@@ -144,7 +144,7 @@ func TestByCategoryEmpatesSaoDeterministicos(t *testing.T) {
 
 	rng := rand.New(rand.NewPCG(9, 17))
 	for i := range 50 {
-		embaralhadas := append([]report.CategoryTotal(nil), rows...)
+		embaralhadas := append([]report.CategoryAccountTotal(nil), rows...)
 		rng.Shuffle(len(embaralhadas), func(x, y int) {
 			embaralhadas[x], embaralhadas[y] = embaralhadas[y], embaralhadas[x]
 		})
@@ -155,7 +155,7 @@ func TestByCategoryEmpatesSaoDeterministicos(t *testing.T) {
 }
 
 // serializar roda o serviço com as linhas dadas e devolve o JSON da resposta.
-func serializar(t *testing.T, a *ambiente, rows []report.CategoryTotal) string {
+func serializar(t *testing.T, a *ambiente, rows []report.CategoryAccountTotal) string {
 	t.Helper()
 	a.ledger.rows = rows
 	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
@@ -174,7 +174,7 @@ func TestByCategorySobraCaiEmDoisNiveisNaMesmaResposta(t *testing.T) {
 	t.Parallel()
 	a := novoAmbiente(t)
 
-	var rows []report.CategoryTotal
+	var rows []report.CategoryAccountTotal
 	for g := range 3 {
 		gid := fmt.Sprintf("g-%d", g)
 		a.categoria(minhaCasa, gid, fmt.Sprintf("Grupo %d", g), category.KindExpense, nil, false)
@@ -221,7 +221,7 @@ func TestByCategoryContagemAltaComValorBaixo(t *testing.T) {
 
 	g1 := a.categoria(minhaCasa, "g-1", "Centavos", category.KindExpense, nil, false)
 	g2 := a.categoria(minhaCasa, "g-2", "Migalhas", category.KindExpense, nil, false)
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(g1.ID), 9, 6_000),
 		linha(ptr(g2.ID), 3, 3_999),
 		linha(nil, 0, 1), // um lançamento de R$ 0,00 sem categoria
@@ -289,7 +289,7 @@ func TestByCategoryDadoAdulteradoNaoVazaNadaDaOutraCasa(t *testing.T) {
 	filhaAlheia := a.categoria(outraCasa, "f-alheia-0002", "Advogado", category.KindExpense, ptr(grupoAlheio.ID), false)
 	minha := a.categoria(minhaCasa, "g-minha", "Mercado", category.KindExpense, nil, false)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(minha.ID), 50_000, 5),
 		linha(ptr(grupoAlheio.ID), 30_000, 2),
 		linha(ptr(filhaAlheia.ID), 20_000, 3),
@@ -335,7 +335,7 @@ func TestByCategoryPaiDeOutraCasaNaoViraGrupo(t *testing.T) {
 
 	paiAlheio := a.categoria(outraCasa, "g-alheio", "Conta Secreta", category.KindExpense, nil, false)
 	minhaFilha := a.categoria(minhaCasa, "f-minha", "Padaria", category.KindExpense, ptr(paiAlheio.ID), false)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(minhaFilha.ID), 1_234, 2)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(minhaFilha.ID), 1_234, 2)}
 
 	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)

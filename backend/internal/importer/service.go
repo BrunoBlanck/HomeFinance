@@ -620,11 +620,12 @@ const (
 //   - `DetectedInstitution` e `DetectedDocKind` saem do ARQUIVO DO PRÓPRIO
 //     usuário, e a conta já foi validada como dele em contaDeDestino antes desta
 //     trava — logo não há BOLA nem vazamento de dado de outra casa aqui.
-//   - Todos os campos são ENUMS FECHADOS (reason, c6/nubank, os dois DocKind).
+//   - Todos os campos são ENUMS FECHADOS (reason, as instituições da allowlist
+//     de importer.Institution, os dois DocKind).
 //     NUNCA entram o nome do arquivo, uma linha do documento ou qualquer PII.
 type targetMismatchError struct {
 	Reason              string // um dos Reason* acima.
-	DetectedInstitution string // instituição detectada no arquivo (c6, nubank).
+	DetectedInstitution string // instituição detectada no arquivo (importer.Institution).
 	DetectedDocKind     string // tipo detectado (card_statement, checking_statement).
 	AccountInstitution  string // instituição da conta; só em wrong_institution.
 }

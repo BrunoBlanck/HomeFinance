@@ -354,6 +354,12 @@ type DetectInput struct {
 //
 // Não existe líquido nem saldo aqui: aporte menos resgate não é patrimônio, e
 // publicar essa subtração convidaria a lê-la como tal (spec 0006 §2.2).
+//
+// ⚠️ Escopo, para quem vier depois: a regra é DESTE schema, e continua valendo
+// por decisão explícita do usuário em 18/09/2026. O PAINEL publica, desde a
+// mesma data, o líquido do mês (aportes − resgates, com sinal, podendo ser
+// negativo) em schema PRÓPRIO — são duas perguntas diferentes, e nenhuma das
+// duas respostas é calculada no cliente. Ver `LICOES-BACKEND.md`.
 type TotalsView struct {
 	ContributionsCents int64 `json:"contributionsCents"`
 	ContributionCount  int64 `json:"contributionCount"`

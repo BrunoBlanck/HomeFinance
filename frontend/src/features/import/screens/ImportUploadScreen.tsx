@@ -197,7 +197,7 @@ export function ImportUploadScreen() {
             <FileField
               label="Arquivo do extrato ou da fatura"
               accept={EXTENSOES}
-              hint="CSV do Nubank ou o ZIP do C6, do jeito que foi baixado — sem renomear nem abrir e salvar de novo."
+              hint="CSV do Nubank ou do Inter, ou o ZIP do C6, do jeito que foi baixado — sem renomear nem abrir e salvar de novo."
               file={arquivo}
               onSelect={(escolhido) => {
                 setArquivo(escolhido)
@@ -379,7 +379,7 @@ function interpretarErro(error: unknown): ResultadoDoErro {
     case 'IMPORT_FORMAT_UNKNOWN':
       return so({
         geral:
-          'Não reconhecemos este arquivo. Ele precisa ser o CSV do Nubank ou o ZIP do C6, do jeito que o banco exportou — sem renomear e sem abrir e salvar de novo.',
+          'Não reconhecemos este arquivo. Ele precisa ser o CSV do Nubank, o CSV do extrato do Inter ou o ZIP do C6, do jeito que o banco exportou — sem renomear e sem abrir e salvar de novo.',
       })
 
     case 'IMPORT_FORMAT_AMBIGUOUS':

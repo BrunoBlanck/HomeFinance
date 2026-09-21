@@ -126,6 +126,12 @@ test.describe('contas', () => {
 test.describe('categorias', () => {
   // D5 da spec 0003: a casa nasce com as categorias, na mesma transação em que
   // ela é criada. É aqui que isso se prova ponta a ponta.
+  //
+  // A árvore INTEIRA da semente — 15 grupos, 41 subcategorias e as
+  // palavras-chave de fábrica (ADR-033) — é assunto de
+  // `semente-de-categorias.spec.ts`, que roda numa casa recém-cadastrada. Aqui
+  // fica só o que esta casa compartilhada pode afirmar: os grupos estão lá, em
+  // português, antes de qualquer spec mexer neles.
   test('casa nova já vem com as categorias em português', async ({ page }) => {
     await page.goto('/categorias')
     await expect(page.getByRole('heading', { name: 'Categorias' })).toBeVisible()
@@ -162,7 +168,10 @@ test.describe('categorias', () => {
 
   test('grupo com subcategoria não se exclui, e a tela oferece o caminho', async ({ page }) => {
     await page.goto('/categorias')
-    // "Moradia" já ganhou "Energia" no teste anterior (modo serial).
+    // "Moradia" tem subcategorias: as três da semente (ADR-033) e a "Energia"
+    // que o teste anterior criou. Antes da semente só havia a "Energia", e era
+    // ela que fazia este caso existir — hoje o grupo já nasce assim, o que é a
+    // mudança que a suíte precisa enxergar, não esconder.
     await page.getByRole('button', { name: 'Excluir Moradia' }).click()
 
     await expect(page.getByText('Não dá para excluir esta categoria')).toBeVisible()
@@ -186,10 +195,14 @@ test.describe('categorias', () => {
     // desenhar — por isso a cascata, e por isso ela é transacional.
     await expect(page.getByText('Lazer', { exact: true })).toHaveCount(0)
     await expect(page.getByText('Cinema', { exact: true })).toHaveCount(0)
+    // A cascata não escolhe: leva TODAS as filhas, inclusive as três que a
+    // semente pendurou em "Lazer" (ADR-033). "Viagens" é uma delas.
+    await expect(page.getByText('Viagens', { exact: true })).toHaveCount(0)
 
     await page.getByLabel('Mostrar arquivadas').check()
     await expect(page.getByText('Lazer', { exact: true })).toBeVisible()
     await expect(page.getByText('Cinema', { exact: true })).toBeVisible()
+    await expect(page.getByText('Viagens', { exact: true })).toBeVisible()
   })
 })
 

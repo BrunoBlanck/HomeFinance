@@ -343,6 +343,14 @@ Lazer, Serviços, Pessoal, Impostos, Outras despesas · Salário, Outras receita
 transação em que a casa é criada (na verificação do e-mail, onde o `EnsureDefault` já roda). Casa
 vazia obriga o usuário a fazer taxonomia antes de lançar o primeiro gasto — é onde se desiste do app.
 
+> **Emenda de 18/09/2026 (decisão do usuário):** a semente deixa de ser só de grupos. Casa nova nasce
+> com **15 grupos, 41 subcategorias e 440 palavras-chave** pré-preenchidas (lista e regras: spec 0003
+> §5 e **ADR-033**), para a categorização automática funcionar já no primeiro extrato importado. O
+> usuário escolheu a versão **enxuta** (~3 folhas por grupo) em vez da completa (66 folhas).
+> "Outras despesas" continua **sem filhas e sem palavras**, como balde residual. **Casas existentes
+> não são tocadas:** a semente roda uma vez, na criação da casa — o ADR-033 traz o erratum ao
+> ADR-029(a), que afirmava (errado) que ela roda no auto-reparo do login.
+
 ### D6 — Cartão de crédito com fatura · ⚠️ **REVERTIDO em 16/09/2026 — entrou na E2 (ADR-023)**
 > **Emenda de 16/09/2026:** a confirmação de 12/09 (*fatura fora do v1*) foi **revogada pelo usuário**.
 > A fatura virou entidade na E2 — `card_statements`, `competence_month`, fechamento e vencimento —, e o
@@ -472,7 +480,7 @@ segunda ida ao servidor com risco de divergir do que está na tela.
 ### 7.4 Painel (E4)
 | Método | Rota | Notas |
 |---|---|---|
-| GET | `/dashboard?month=YYYY-MM` | um pedido, uma tela: saldo total e por conta · entradas/saídas/resultado do mês · próximos vencimentos e atrasados · top categorias · comparação com o mês anterior |
+| GET | `/dashboard?month=YYYY-MM` | um pedido, uma tela: saldo total e por conta · entradas/saídas/resultado do mês · próximos vencimentos e atrasados · top categorias · comparação com o mês anterior. **A 1ª fatia (spec 0008) entrega só três números: investido no mês (líquido, com sinal), receita (sem resgates) e gasto no cartão de crédito** — os demais blocos entram depois, aditivamente, no mesmo schema |
 
 ### 7.5 Orçamentos e relatórios (E5, E6)
 | Método | Rota | Notas |
@@ -650,7 +658,13 @@ igual ao de `GET /accounts` no mês corrente · 10.000 linhas × 1.000 palavras-
 `KeywordsField` por teclado com contagem anunciada · Playwright: cadastrar palavra → importar → linha
 vem sugerida → confirmar → lançamento tem a categoria · revisão de segurança APROVADO.
 
-### E3 — Contas fixas · *spec 0006*
+> **Numeração de spec é atribuída na ESCRITA, não aqui (corrigido em 18/09/2026).** Prever o número
+> na fila produziu três divergências reais: a E2d tomou o **0007** sem que o arquivo existisse, a E6a
+> saiu **sem spec**, e o painel tomou o **0008** que estava reservado para a E5 — que passou a colidir
+> com a E6. A partir daqui, a fila diz *a numerar*; o número nasce com o arquivo em `docs/specs/`.
+> (A E6 mantém o **0009** porque o bloco da E6a já se compromete com esse número em dois pontos.)
+
+### E3 — Contas fixas · *spec a numerar quando for escrita*
 **Objetivo:** nenhuma conta vence sem aviso.
 Escopo: `recurring_bills` + `bill_occurrences` · projeção virtual do mês (D7) · pagar/desfazer/pular
 idempotentes · clamp de dia em mês curto · status derivado no fuso da casa · tela `/contas-fixas`.
@@ -658,14 +672,19 @@ idempotentes · clamp de dia em mês curto · status derivado no fuso da casa ·
 desfazer remove o lançamento e volta o status · testes com o processo em UTC **e** em
 `America/Sao_Paulo` · revisão APROVADO.
 
-### E4 — Painel do mês · *spec 0007 curta (ou anexo da 0006)*
+### E4 — Painel do mês · *spec **0008** (o número 0007 nunca chegou a existir: a E2d virou emenda §12 da spec 0004)*
 **Objetivo:** responder "como estamos?" em uma tela.
+
+> **Fatiada em 18/09/2026, a pedido do usuário.** A **primeira fatia** — a faixa de resumo do mês com
+> três números (**investido no mês**, líquido com sinal; **receita**, sem resgates; **gasto no cartão de
+> crédito**, um número só) — está na `docs/specs/0008-painel-resumo-do-mes.md`. Saldo por conta,
+> vencimentos, top categorias e comparação com o mês anterior seguem nesta E4, depois dela.
 Escopo: `GET /dashboard` agregando em uma consulta por bloco · tela `/` com resultado do mês, saldos,
 vencimentos e top categorias · comparação com o mês anterior.
 **Aceite:** um único pedido de rede monta a tela · números idênticos aos das telas de origem (mesma
 fonte, sem cálculo duplicado no front) · revisão APROVADO.
 
-### E5 — Orçamentos · *spec 0008*
+### E5 — Orçamentos · *spec a numerar quando for escrita*
 Escopo: `budgets` com upsert portátil (P8) · comparação limite × gasto (grupo soma filhos) · copiar
 do mês anterior · tela `/orcamentos`.
 **Aceite:** orçamento de grupo reflete gasto dos filhos · copiar duas vezes não duplica · estouro
@@ -759,7 +778,7 @@ APROVADO.
 > **Emenda de 17/09/2026:** o relatório **por categoria** já saiu na **E6a** (ADR-027). A spec 0009
 > nasce partindo dele como entregue e cobre evolução mensal, por conta e exportação CSV.
 
-### E7 — Convites e membros · *spec 0010* · fecha a Fase 2 (DV2)
+### E7 — Convites e membros · *spec a numerar quando for escrita* · fecha a Fase 2 (DV2)
 Escopo: `invitations` com código de 6 dígitos (mesma disciplina do ADR-009: só hash HMAC, uso único,
 expiração, limite de tentativas, rate limit) · aceitar convite · listar/remover membro, trocar papel ·
 tela `/casa`.

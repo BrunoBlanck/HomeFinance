@@ -260,3 +260,129 @@ func (t Transaction) SignedAmountCents() int64 {
 		return 0
 	}
 }
+
+// --- spec 0004 §12 (emenda E2d): filtro de TIPO de GET /transactions -------
+
+// Grupos do filtro `kindGroup`. Conjunto FECHADO, validado por allowlist na
+// borda — o valor NUNCA é interpolado em SQL, e ausente quer dizer "tudo".
+//
+// O grupo não é o `kind` da linha: `transfer` são DOIS kinds, e `investment`
+// são os MESMOS dois kinds de `income`/`expense` separados pela NATUREZA DA
+// CATEGORIA (ADR-029a). Por isso ele é um vocabulário próprio, e não a coluna.
+const (
+	KindGroupIncome     = "income"
+	KindGroupExpense    = "expense"
+	KindGroupTransfer   = "transfer"
+	KindGroupInvestment = "investment"
+)
+
+// ValidKindGroup é a allowlist do filtro. String vazia é "sem filtro" e passa;
+// qualquer outra coisa é recusada ANTES de chegar ao repositório.
+func ValidKindGroup(g string) bool {
+	switch g {
+	case "", KindGroupIncome, KindGroupExpense, KindGroupTransfer, KindGroupInvestment:
+		return true
+	default:
+		return false
+	}
+}
+
+// --- spec 0010 §3.1 item 8 (E9a): agrupamento por descrição ----------------
+
+// MaxDescriptionGroupRows é o TETO DURO de linhas que uma agregação por
+// descrição pode devolver, e a fronteira entre "casa grande" e "pergunta que
+// este produto não responde".
+//
+// O número é MEDIDO, não arbitrado (lição de 18/09/2026 — custo do corte
+// medido, nunca estimado). A medição de 21/09/2026, em SQLite, sobre a janela
+// máxima de 3 meses de competência:
+//
+//   - banco de desenvolvimento real ............................ 83 linhas
+//   - casa pesada realista (750 lançamentos na janela) ..... 336 a 712 linhas
+//   - extremo dos testes de volume (10.000 na janela) ... 3.974 a 7.278 linhas
+//
+// (as duas faixas são o corpus sintético com e sem correlação entre descrição,
+// conta e categoria; a forma correlacionada é a do mundo real, a outra é o
+// teto pessimista.)
+//
+// 5.000 fica ~7× acima da casa pesada realista e ~60× acima do banco real, e
+// prende o pior caso de memória por requisição em ~2 MB (5.001 linhas × ~400 B
+// com descrição no comprimento máximo). Acima dele a resposta é 422 — nunca
+// uma resposta PARCIAL, que é a única saída de verdade ruim aqui: um prompt
+// silenciosamente incompleto faria a IA propor palavra-chave para metade da
+// casa sem ninguém saber.
+const MaxDescriptionGroupRows = 5000
+
+// MaxCompetenceMonthsInWindow é a janela de trabalho do menu IA: no máximo 3
+// meses de competência, inclusive (spec 0010 §2.1 e emenda §10 achado A2 —
+// decisão do usuário de 21/09/2026).
+//
+// É ela que autoriza o `IN (?, ?, ?)` da consulta: com a janela travada em 3,
+// a faixa nunca precisa virar `BETWEEN`, que sobre uma coluna de TEXTO
+// dependeria da collation de cada dialeto.
+const MaxCompetenceMonthsInWindow = 3
+
+// ErrTooManyDescriptionGroups — a agregação por descrição passou de
+// MaxDescriptionGroupRows linhas na janela pedida.
+//
+// A semântica é TUDO OU NADA: quem recebe este erro não recebe linha nenhuma.
+// Devolver as primeiras N seria pior que falhar — o chamador montaria um
+// prompt que parece completo e não é.
+var ErrTooManyDescriptionGroups = errors.New("descrições demais na janela")
+
+// DescriptionGroup é a projeção de uma leitura AGREGADA de lançamentos: UMA
+// linha por (description_norm, kind, account_id, category_id).
+//
+// Mora aqui, no domínio de lançamento, porque é de lançamento que ela fala —
+// e não em `aiprompt`/`aiimport`, que são só dois dos seus consumidores. Cada
+// um deles declara a sua própria interface ESTREITA sobre ela, do mesmo jeito
+// que `dashboard` declara `Ledger` e importa `transaction.MarcadaComoInvestimento`
+// em vez de reescrever o predicado.
+//
+// As quatro colunas da chave são as que mudam a RESPOSTA que o prompt precisa
+// dar sobre a descrição: `kind` e `category_id` porque a mesma descrição pode
+// ter sido classificada de formas diferentes (e é justamente essa divergência
+// que vira "várias" na linha do prompt), e `account_id` porque o prompt lista
+// em que contas a descrição apareceu. Agrupar só por `description_norm`
+// perderia essas três respostas e obrigaria a uma segunda consulta.
+type DescriptionGroup struct {
+	// DescriptionNorm é a chave do agrupamento: é ela que faz "MERCADO DO SEU
+	// JOSÉ" e "mercado do seu jose" caírem na MESMA linha (critério 5 da
+	// spec 0010).
+	DescriptionNorm string
+
+	// SampleDescription é UMA das grafias originais do grupo — uma AMOSTRA
+	// para o texto ficar legível, NUNCA um contrato.
+	//
+	// Vem de `MIN(description)`, e qual das grafias o `MIN` escolhe depende da
+	// COLLATION do banco: o mesmo dado devolve "Zaffari" num dialeto e
+	// "ZAFFARI" noutro, e as duas respostas estão certas. Nenhum teste deste
+	// projeto pode assertar qual grafia veio, e nenhuma regra de negócio pode
+	// depender disso. O que é estável, e o que a lógica usa, é
+	// DescriptionNorm.
+	SampleDescription string
+
+	// Kind é o `kind` cru da linha (income, expense, transfer_in,
+	// transfer_out) — NÃO o `kindGroup` da tela, que é agrupamento e depende
+	// da natureza da categoria (emenda §12 da spec 0004). Quem quiser o grupo
+	// o deriva, como o resto do projeto já faz.
+	Kind string
+
+	// AccountID nunca é nulo: `transactions.account_id` é NOT NULL.
+	AccountID string
+
+	// CategoryID é ponteiro para receber a linha em que category_id IS NULL —
+	// os quatro dialetos agrupam os nulos numa linha só, e é ela que vira o
+	// "—" (sem categoria) do prompt.
+	CategoryID *string
+
+	// Count é quantos lançamentos vivos caíram neste grupo.
+	Count int64
+
+	// TotalCents é a soma dos valores do grupo, em CENTAVOS e sempre positiva
+	// — `amount_cents` é positivo por invariante do domínio e o sinal vem do
+	// kind. Somar grupos de kinds diferentes sem passar pelo sinal seria
+	// somar despesa com receita; quem precisa de saldo usa
+	// Transaction.SignedAmountCents.
+	TotalCents int64
+}

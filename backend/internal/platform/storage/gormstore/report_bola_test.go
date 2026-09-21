@@ -3,8 +3,10 @@ package gormstore_test
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/brunorblanck/homefinance/backend/internal/account"
 	"github.com/brunorblanck/homefinance/backend/internal/category"
 	"github.com/brunorblanck/homefinance/backend/internal/civil"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/logging"
@@ -25,7 +27,7 @@ import (
 func relatorioDaCasa(t *testing.T, s *store, casa, mes, kind string) (report.CategoryReportView, string) {
 	t.Helper()
 	logs := &bytes.Buffer{}
-	svc := report.NewService(s.transactions, s.categories, logging.New(logs, logging.Options{Level: "debug", Format: "json"}))
+	svc := report.NewService(s.transactions, s.categories, s.accounts, logging.New(logs, logging.Options{Level: "debug", Format: "json"}))
 	v, err := svc.ByCategory(t.Context(), report.Actor{HouseholdID: casa, UserID: "u"}, report.ByCategoryInput{Month: mes, Kind: kind})
 	require.NoError(t, err)
 	return v, logs.String()
@@ -196,5 +198,142 @@ func TestRelatorioComPaiDeOutraCasaPromoveAFilha(t *testing.T) {
 		assert.Contains(t, log, `"level":"WARN"`)
 		assert.Contains(t, log, filhaA.ID, "o aviso leva o id da filha, que é da própria casa")
 		assert.NotContains(t, log, "Segredo")
+	})
+}
+
+// BOLA do RECORTE (ADR-032): duas casas com cartões de MESMO NOME e despesas
+// no mesmo mês. O `credit` de uma nunca contém conta nem categoria da outra —
+// e o conjunto de cartões de cada uma sai da lista da PRÓPRIA casa.
+//
+// Nomes idênticos são o ponto: se o recorte casasse por nome, ou se o
+// household_id sumisse do WHERE das contas, um cenário com nomes diferentes
+// só mostraria "número errado"; com nomes iguais, a única forma de A ver algo
+// de B é o escopo ter falhado.
+func TestRelatorioRecorteNaoVazaEntreCasasComCartoesDeMesmoNome(t *testing.T) {
+	t.Parallel()
+
+	eachBackend(t, func(t *testing.T, s *store) {
+		ctx := t.Context()
+		casaA, casaB := s.duasCasas(t, ctx)
+		set := civil.MustNew(2026, 9, 10)
+
+		cartaoA := s.makeAccountKind(t, ctx, casaA.ID, "Cartao Roxo", account.KindCreditCard, false)
+		correnteA := s.makeAccountKind(t, ctx, casaA.ID, "Conta Corrente", account.KindChecking, false)
+		cartaoB := s.makeAccountKind(t, ctx, casaB.ID, "Cartao Roxo", account.KindCreditCard, false)
+		correnteB := s.makeAccountKind(t, ctx, casaB.ID, "Conta Corrente", account.KindChecking, false)
+
+		mercadoA := s.makeCategory(t, ctx, casaA.ID, "Mercado", category.KindExpense, nil)
+		mercadoB := s.makeCategory(t, ctx, casaB.ID, "Mercado", category.KindExpense, nil)
+
+		s.makeTransaction(t, ctx, casaA.ID, cartaoA.ID, txSpec{AmountCents: 1_000, OccurredOn: set, CategoryID: &mercadoA.ID})
+		s.makeTransaction(t, ctx, casaA.ID, correnteA.ID, txSpec{AmountCents: 2_000, OccurredOn: set, CategoryID: &mercadoA.ID})
+		// Valores marcantes na casa B: se um deles aparecer em A, o teste vê.
+		s.makeTransaction(t, ctx, casaB.ID, cartaoB.ID, txSpec{AmountCents: 987_654, OccurredOn: set, CategoryID: &mercadoB.ID})
+		s.makeTransaction(t, ctx, casaB.ID, correnteB.ID, txSpec{AmountCents: 123_456, OccurredOn: set, CategoryID: &mercadoB.ID})
+
+		pedir := func(casa, grupo string) (report.CategoryReportView, string) {
+			logs := &bytes.Buffer{}
+			svc := report.NewService(s.transactions, s.categories, s.accounts,
+				logging.New(logs, logging.Options{Level: "debug", Format: "json"}))
+			v, err := svc.ByCategory(t.Context(), report.Actor{HouseholdID: casa, UserID: "u"},
+				report.ByCategoryInput{Month: "2026-09", Kind: transaction.KindExpense, AccountGroup: grupo})
+			require.NoError(t, err)
+			return v, logs.String()
+		}
+
+		creditoA, logA := pedir(casaA.ID, report.AccountGroupCredit)
+		debitoA, _ := pedir(casaA.ID, report.AccountGroupDebit)
+		creditoB, _ := pedir(casaB.ID, report.AccountGroupCredit)
+		debitoB, _ := pedir(casaB.ID, report.AccountGroupDebit)
+
+		assert.Equal(t, int64(1_000), creditoA.TotalCents, "só o cartão da casa A")
+		assert.Equal(t, int64(2_000), debitoA.TotalCents)
+		assert.Equal(t, int64(987_654), creditoB.TotalCents, "só o cartão da casa B")
+		assert.Equal(t, int64(123_456), debitoB.TotalCents)
+
+		// Nada de B na resposta de A (e vice-versa), em nenhum dos recortes.
+		for nome, v := range map[string]report.CategoryReportView{"credit": creditoA, "debit": debitoA} {
+			bruto, err := json.Marshal(v)
+			require.NoError(t, err)
+			for _, proibido := range []string{cartaoB.ID, correnteB.ID, mercadoB.ID, casaB.ID, "987654", "123456"} {
+				assert.NotContains(t, string(bruto), proibido, "o %s de A carrega algo de B", nome)
+			}
+		}
+		for nome, v := range map[string]report.CategoryReportView{"credit": creditoB, "debit": debitoB} {
+			bruto, err := json.Marshal(v)
+			require.NoError(t, err)
+			for _, proibido := range []string{cartaoA.ID, correnteA.ID, mercadoA.ID, casaA.ID} {
+				assert.NotContains(t, string(bruto), proibido, "o %s de B carrega algo de A", nome)
+			}
+		}
+
+		// Nenhum aviso: todas as contas das duas casas existem nas suas casas.
+		assert.NotContains(t, logA, `"level":"WARN"`)
+
+		// E a soma dos dois recortes é o mês inteiro, em cada casa.
+		todasA, _ := pedir(casaA.ID, "")
+		assert.Equal(t, todasA.TotalCents, creditoA.TotalCents+debitoA.TotalCents)
+		todasB, _ := pedir(casaB.ID, "")
+		assert.Equal(t, todasB.TotalCents, creditoB.TotalCents+debitoB.TotalCents)
+	})
+}
+
+// A outra metade da adulteração: um lançamento da casa A aponta para o CARTÃO
+// da casa B. O recorte não pode "adotar" o cartão alheio — a conta não está na
+// lista da casa A, então a linha não é cartão: ela cai em `debit` (falha
+// ABERTA, o dinheiro não some) com um aviso que leva só o id.
+func TestRelatorioRecorteComContaDeOutraCasaNaoAdotaOCartao(t *testing.T) {
+	t.Parallel()
+
+	eachBackend(t, func(t *testing.T, s *store) {
+		ctx := t.Context()
+		casaA, casaB := s.duasCasas(t, ctx)
+		set := civil.MustNew(2026, 9, 10)
+
+		cartaoA := s.makeAccountKind(t, ctx, casaA.ID, "Cartao Meu", account.KindCreditCard, false)
+		cartaoB := s.makeAccountKind(t, ctx, casaB.ID, "Cartao Secreto", account.KindCreditCard, false)
+		mercadoA := s.makeCategory(t, ctx, casaA.ID, "Mercado", category.KindExpense, nil)
+
+		s.makeTransaction(t, ctx, casaA.ID, cartaoA.ID, txSpec{AmountCents: 1_000, OccurredOn: set, CategoryID: &mercadoA.ID})
+		adulterada := s.makeTransaction(t, ctx, casaA.ID, cartaoA.ID, txSpec{AmountCents: 30_000, OccurredOn: set, CategoryID: &mercadoA.ID})
+		// Escrita DIRETA na tabela: a API nunca aceitaria conta de outra casa.
+		require.NoError(t, s.db.Gorm().WithContext(ctx).Table("transactions").
+			Where("id = ?", adulterada.ID).Update("account_id", cartaoB.ID).Error)
+
+		pedir := func(grupo string) (report.CategoryReportView, string) {
+			logs := &bytes.Buffer{}
+			svc := report.NewService(s.transactions, s.categories, s.accounts,
+				logging.New(logs, logging.Options{Level: "debug", Format: "json"}))
+			v, err := svc.ByCategory(t.Context(), report.Actor{HouseholdID: casaA.ID, UserID: "u"},
+				report.ByCategoryInput{Month: "2026-09", Kind: transaction.KindExpense, AccountGroup: grupo})
+			require.NoError(t, err)
+			return v, logs.String()
+		}
+
+		credito, logCredito := pedir(report.AccountGroupCredit)
+		debito, logDebito := pedir(report.AccountGroupDebit)
+		todas, _ := pedir("")
+
+		assert.Equal(t, int64(1_000), credito.TotalCents, "o cartão da casa B não vira cartão da casa A")
+		assert.Equal(t, int64(30_000), debito.TotalCents, "falha ABERTA: o dinheiro do lançamento aparece")
+		assert.Equal(t, todas.TotalCents, credito.TotalCents+debito.TotalCents)
+
+		for nome, log := range map[string]string{"credit": logCredito, "debit": logDebito} {
+			assert.Equal(t, 1, strings.Count(log, `"level":"WARN"`), "%s: UM aviso por requisição", nome)
+			assert.Contains(t, log, `"conta_desconhecida":1`, nome)
+			assert.Contains(t, log, cartaoB.ID, "%s: o aviso leva o id", nome)
+			assert.NotContains(t, log, "Secreto", "%s: nunca o nome da conta", nome)
+			assert.NotContains(t, log, "30000", "%s: nunca centavos", nome)
+		}
+
+		// E a casa B continua sem ver o dinheiro: adulterar o account_id não
+		// move o lançamento de casa.
+		logs := &bytes.Buffer{}
+		svcB := report.NewService(s.transactions, s.categories, s.accounts,
+			logging.New(logs, logging.Options{Level: "debug", Format: "json"}))
+		vB, err := svcB.ByCategory(ctx, report.Actor{HouseholdID: casaB.ID, UserID: "v"},
+			report.ByCategoryInput{Month: "2026-09", AccountGroup: report.AccountGroupCredit})
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), vB.TotalCents)
 	})
 }

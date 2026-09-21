@@ -62,12 +62,18 @@ const (
 	// o modelo de DUAS COLUNAS (Entrada(R$)/Saída(R$)) e traz preâmbulo; a
 	// fatura usa valor com sinal (positivo é saída), como a do Nubank.
 	InstitutionC6 Institution = "c6"
+
+	// InstitutionInter — por ora SÓ o extrato de conta (pacote importer/inter,
+	// spec 0004 §7.4): valor com sinal em formato brasileiro (`-9.950,00`),
+	// negativo é saída, preâmbulo de 5 linhas. A fatura do cartão entra quando
+	// houver amostra — sem amostra não se declara convenção de sinal.
+	InstitutionInter Institution = "inter"
 )
 
 // Valid informa se a instituição está na allowlist.
 func (i Institution) Valid() bool {
 	switch i {
-	case InstitutionNubank, InstitutionC6:
+	case InstitutionNubank, InstitutionC6, InstitutionInter:
 		return true
 	default:
 		return false

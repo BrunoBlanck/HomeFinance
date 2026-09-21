@@ -32,9 +32,19 @@ const CARTAO_C6 = 'Cartão C6'
 
 /** A fatura do C6, montada aqui em vez de lida de arquivo — deixa à vista qual
  *  dado entra. O formato é o `c6.card_statement.v1`: separador `;`, 9 colunas,
- *  ponto decimal, POSITIVO é compra (saída). Sem preâmbulo. */
+ *  ponto decimal, POSITIVO é compra (saída). Sem preâmbulo.
+ *
+ *  **As descrições são inventadas** (ADR-033, 18/09/2026). A primeira chamava-se
+ *  `MERCADO QA EXEMPLO` e, com a semente de categorias, passou a casar
+ *  «minimercado» por aproximação (89): a linha entrava categorizada em
+ *  "Alimentação › Supermercado" sem que nenhum teste daqui tivesse pedido isso.
+ *  Não quebrava nada — este arquivo não afirma categoria —, mas era um
+ *  acoplamento silencioso esperando a primeira asserção de categoria. `QUIRPEL`,
+ *  `MOVEL` e `APP` foram conferidos contra o motor real (`internal/textmatch`
+ *  com a lista de `internal/category/seed.go`): os três dão 0 nos dois lados do
+ *  dinheiro, bem abaixo do limiar de 80. */
 const COMPRAS = [
-  { data: '03/09/2026', descricao: 'MERCADO QA EXEMPLO', parcela: 'Única', valor: '120.00' },
+  { data: '03/09/2026', descricao: 'QUIRPEL QA EXEMPLO', parcela: 'Única', valor: '120.00' },
   { data: '05/09/2026', descricao: 'MOVEL QA EXEMPLO', parcela: '2/7', valor: '284.01' },
   { data: '10/09/2026', descricao: 'APP QA EXEMPLO', parcela: 'Única', valor: '9.57' },
 ]
@@ -158,7 +168,7 @@ test.describe('importação C6 — o beco sem saída virou caminho', () => {
     // leitor de tela é "negativos" (saída), não "positivos".
     await expect(
       page
-        .getByRole('row', { name: /MERCADO QA EXEMPLO/ })
+        .getByRole('row', { name: /QUIRPEL QA EXEMPLO/ })
         .getByText('R$ 120,00 negativos', { exact: true }),
     ).toBeAttached()
     // E a parcela foi preservada na descrição.

@@ -435,7 +435,7 @@ describe('AccountsScreen', () => {
       within(seletor)
         .getAllByRole('option')
         .map((o) => o.getAttribute('value')),
-    ).toEqual(['c6', 'nubank', 'other'])
+    ).toEqual(['c6', 'inter', 'nubank', 'other'])
     // Default do contrato, e não uma escolha em branco que o servidor teria de
     // adivinhar.
     expect(seletor).toHaveValue('other')

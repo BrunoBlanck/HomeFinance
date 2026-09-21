@@ -42,6 +42,46 @@ type ListFilter struct {
 	// exibido deixaria de bater com o total cobrado.
 	StatementID string
 
+	// KindGroup restringe a página a um GRUPO de tipos (spec 0004 §12, emenda E2d).
+	//
+	// Vazio é "tudo". Os demais valores vêm da allowlist FECHADA
+	// KindGroup* — o handler recusa antes, e o repositório recusa de novo
+	// (ErrUnknownKindGroup): o valor vira `kind = ?` ou `kind IN ?` por
+	// PLACEHOLDER, nunca texto montado.
+	//
+	// `investment` exige InvestmentCategoryIDs não vazio; `income` e
+	// `expense` o usam para EXCLUIR o que está marcado. Ver
+	// InvestmentCategoryIDs abaixo.
+	KindGroup string
+
+	// InvestmentCategoryIDs é o MESMO conjunto de SummaryFilter: as
+	// categorias de natureza `investment`/`redemption` da casa, arquivadas
+	// incluídas (ADR-029a), lidas UMA vez por requisição e NUNCA vindas do
+	// cliente.
+	//
+	// Aqui ele não é "mais um filtro de categoria": ele só é lido quando
+	// KindGroup pede. Com `income`/`expense`, vazio quer dizer "esta casa não
+	// marca nada" e a cláusula NOT IN simplesmente NÃO ENTRA na consulta — o
+	// SQL volta a ser byte a byte o de antes do E2d. Com `investment`, vazio
+	// é ErrEmptyCategoryFilter e não "todas as categorias": quem chama faz o
+	// curto-circuito em Go antes (ADR-029f), e `IN ()` nunca é emitido.
+	InvestmentCategoryIDs []string
+
+	// CategoryIDs restringe a página a um conjunto de categorias — o atalho
+	// "Ver lançamentos" do relatório por categoria.
+	//
+	// Vazio é "sem filtro", como todo campo vazio deste tipo, e é seguro aqui
+	// pelo motivo que NÃO vale em CategoryListFilter: quem pede um recorte
+	// sempre manda pelo menos a própria categoria pedida, porque o serviço
+	// monta o conjunto como `{a categoria} ∪ {filhas dela}`. Não existe
+	// caminho em que o cliente peça uma categoria e chegue aqui lista vazia —
+	// categoria que não é da casa vira 404 antes, no serviço.
+	//
+	// Os ids entram por PLACEHOLDER (`category_id IN ?`), nunca no texto do
+	// comando, e são ids CANÔNICOS do banco, nunca a grafia que o cliente
+	// mandou.
+	CategoryIDs []string
+
 	// Cursor, quando presente, continua de onde a página anterior parou.
 	Cursor *Cursor
 
@@ -56,6 +96,27 @@ type ListFilter struct {
 type SummaryFilter struct {
 	CompetenceMonth string
 	AccountID       string
+
+	// KindGroup é o grupo pedido — e **NUNCA ENTRA NO SQL DESTE RESUMO**.
+	//
+	// ISTO NÃO É UM ESQUECIMENTO, É O DESENHO. O `WHERE` do resumo é o mesmo
+	// para as CINCO opções (casa + mês + conta): `InvestedCents` e
+	// `RedeemedCents` não descrevem a janela — descrevem o que SAIU de
+	// `IncomeCents`/`ExpenseCents` (ADR-029e) —, e é deles que vive a frase
+	// "Fora destes números: R$ X em aportes" (spec 0006 §3.5.2). Filtrar o
+	// resumo por tipo zeraria essa explicação justamente sob `?tipo=despesas`,
+	// que é onde a omissão é maior.
+	//
+	// A distinção entre os cinco recortes acontece na PROJEÇÃO (`marked_total`
+	// e `marked_cnt` por kind) e na aritmética que o SERVIÇO faz sobre
+	// Summary.ByKind — nunca num predicado. Quem "consertar" isto
+	// acrescentando o grupo ao `WHERE` quebra a frase e quebra
+	// TestSummaryEmiteOMesmoSQLParaOsCincoGruposDeTipo, que compara o comando
+	// EMITIDO e existe exatamente para esse dia.
+	//
+	// O repositório só o usa para RECUSAR o que está fora da allowlist, antes
+	// de qualquer SQL — defesa em profundidade, como em ListFilter.
+	KindGroup string
 
 	// InvestmentCategoryIDs é o conjunto das categorias de natureza
 	// `investment`/`redemption` da casa (ADR-029a), com as ARQUIVADAS
@@ -72,6 +133,21 @@ type SummaryFilter struct {
 	// volta a ser exatamente o de antes do E7: `IN ()` não é emitido em
 	// dialeto nenhum (ADR-029f).
 	InvestmentCategoryIDs []string
+
+	// CategoryIDs é o MESMO conjunto de ListFilter, e ENTRA no WHERE — ao
+	// contrário de KindGroup.
+	//
+	// A diferença não é inconsistência: KindGroup fica fora porque o resumo
+	// precisa enxergar aporte e resgate mesmo sob "Despesas" (ADR-029e), e a
+	// distinção dos cinco recortes é feita por aritmética sobre a mesma
+	// leitura. CategoryIDs é filtro de JANELA, como AccountID: ele muda de
+	// que linhas se está falando, e um resumo do mês inteiro embaixo de uma
+	// lista de uma categoria seria o número errado sob o rótulo certo.
+	//
+	// Vazio é "sem filtro" e não altera byte nenhum do comando emitido — é o
+	// que mantém o SQL do resumo idêntico ao de antes nas requisições que não
+	// pedem categoria (TestSummaryEmiteOMesmoSQLParaOsCincoGruposDeTipo).
+	CategoryIDs []string
 }
 
 // CategoryListFilter é a janela da listagem POR CATEGORIA — os itens da tela
@@ -241,6 +317,69 @@ type Summary struct {
 	// despesa NEGATIVA na tela.
 	InvestedCents int64
 	RedeemedCents int64
+
+	// ByKind é a MESMA linha agregada que produziu os campos acima, uma por
+	// `kind`, como o banco a devolveu — cinco colunas e nada derivado.
+	//
+	// Existe por causa do filtro de tipo (spec 0004 §12, emenda E2d): as cinco opções
+	// de `kindGroup` são montadas por ARITMÉTICA sobre estes números, no
+	// serviço, a partir de UMA consulta — e não por cinco WHEREs diferentes.
+	// Por exemplo, a contagem sob `expense` é `expense.Count −
+	// expense.MarkedCount`, e sob `investment` é `income.MarkedCount +
+	// expense.MarkedCount`.
+	//
+	// É o que permite que `InvestedCents`/`RedeemedCents` sejam IGUAIS nas
+	// cinco opções: eles não descrevem a janela, descrevem o que SAIU de
+	// receita e despesa (ADR-029e), e é deles que vive a frase "Fora destes
+	// números: R$ X em aportes" (spec 0006 §3.5.2). Zerá-los sob o recorte de
+	// despesas apagaria a explicação exatamente onde a omissão é maior.
+	//
+	// Vem ordenado por `kind` (em Go, ≤ 4 itens): a ordenação do banco é a
+	// última diferença de dialeto que sobraria aqui (collation).
+	ByKind []SummaryKindTotals
+}
+
+// SummaryKindTotals é a linha agregada de UM `kind` da janela do resumo.
+//
+// São as cinco colunas que a consulta projeta, sem nada calculado em cima:
+// quem calcula é o serviço, e é por isso que os cinco recortes de `kindGroup`
+// não podem discordar entre si — todos saem destes mesmos números, da mesma
+// leitura, do mesmo instante.
+type SummaryKindTotals struct {
+	// Kind é `income`, `expense`, `transfer_out` ou `transfer_in`.
+	Kind string
+
+	// Count e TotalCents são COUNT(*) e SUM(amount_cents) do kind.
+	Count      int64
+	TotalCents int64
+
+	// Uncategorized conta as linhas sem categoria DESTE kind, CRU, como o
+	// `SUM(CASE WHEN category_id IS NULL …)` devolveu.
+	//
+	// ⚠️ ARMADILHA, e ela foi MEDIDA, não suposta: em `transfer_out` e
+	// `transfer_in` este número é igual a Count, e não zero — transferência
+	// nunca tem categoria (ADR-016), então TODA perna casa com
+	// `category_id IS NULL`. Somar os quatro kinds daria "pendências" que
+	// ninguém consegue resolver, porque não há categoria para atribuir a uma
+	// perna.
+	//
+	// Quem monta o número de pendências soma APENAS `income` e `expense` — é
+	// o que o campo agregado Summary.Uncategorized já faz. Este aqui é a
+	// matéria-prima, e vem crua de propósito: derivar no repositório
+	// esconderia a diferença justamente de quem precisa vê-la.
+	Uncategorized int64
+
+	// MarkedTotalCents e MarkedCount são a parte deste kind cuja categoria
+	// está em SummaryFilter.InvestmentCategoryIDs. Zero quando a casa não
+	// marca nada — aí as duas colunas nem entram na consulta (ADR-029f).
+	//
+	// `0 ≤ MarkedTotalCents ≤ TotalCents` e `0 ≤ MarkedCount ≤ Count` valem
+	// por construção (são agregados das MESMAS linhas, e amount_cents é
+	// sempre positivo), mas a desigualdade é VERIFICADA antes de publicar e
+	// nunca confiada — ela depende de invariante do caminho de escrita, não
+	// do schema (ADR-029 j.1).
+	MarkedTotalCents int64
+	MarkedCount      int64
 }
 
 // InvestmentMonthTotals são os dois fluxos de UM mês de competência
@@ -297,6 +436,15 @@ var ErrEmptyCategoryFilter = errors.New("consulta por categoria exige ao menos u
 // o teto do domínio subir, a consulta falha ALTO aqui em vez de estourar
 // dentro do driver, em dois dialetos só, em produção.
 var ErrTooManyCategories = errors.New("consulta por categoria recebeu categorias demais")
+
+// ErrUnknownKindGroup é o grupo de tipo fora da allowlist chegando ao
+// repositório.
+//
+// A borda já recusa com 400 (ValidKindGroup), então este erro é defesa em
+// profundidade — e é FECHADO de propósito: um grupo desconhecido tratado como
+// "sem filtro" devolveria a janela INTEIRA para quem pediu um recorte, que é
+// o modo silencioso de vazar exatamente o que o filtro existia para esconder.
+var ErrUnknownKindGroup = errors.New("filtro de tipo desconhecido")
 
 // DedupRow é a projeção mínima usada pela deduplicação da importação.
 //

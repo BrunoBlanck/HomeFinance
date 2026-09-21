@@ -63,6 +63,13 @@ aproximação" — o `arquiteto` decide o que fazer.
       `semCategoria` só passa se for exatamente `'1'`; qualquer outra coisa some da busca. A URL é
       editável pela pessoa e nada não validado pode chegar a uma query. Responsável:
       `dev-frontend-react` (é trabalho desta entrega, mas acontece antes das telas).
+- [ ] **P5 · `investedCents`/`redeemedCents` do `summary` não respondem ao `kindGroup`** (emenda
+      E2d, 18/09/2026). Eles seguem respondendo a `month` e `accountId` e **ignoram** o filtro de
+      tipo; do contrário vão a zero justamente sob `?tipo=despesas`, e a 2ª linha da faixa
+      ("Fora destes números: 2.000,00 em aportes") some — contra a exigência da spec 0006 §3.5.2 e
+      contra o que o próprio schema manda. `uncategorizedCount` e `count`, ao contrário, **seguem**
+      o `kindGroup`. A degradação aceita (a tela não fica bloqueada) e o texto completo da
+      exigência estão em `docs/DESIGN.md` E2d (j). Responsável: `arquiteto` / `dev-backend-go`.
 
 Premissa adicional assumida pela direção: a análise de importação é um recurso com id opaco
 (`/importar/{importId}/revisar`). Id de recurso em URL é o mesmo padrão de `/contas/{id}` e **não**
@@ -204,6 +211,69 @@ lê antes de clicar.
 
 Erro na exclusão **não vira toast**: vira `FormError` dentro do `<dialog>`, que continua aberto com
 os botões no lugar.
+
+### 1.6 Filtro de tipo — emenda de 18/09/2026 (E2d)
+
+A faixa ganha um segundo filtro, de **escolha única**: `Tudo · Receitas · Despesas ·
+Transferências · Investimentos` (`?tipo=` na URL, `?kindGroup=` na API; "Tudo" é a **ausência** da
+chave). A direção completa — controle, faixa do mês, subtotal do dia, faixa de pendência, toast,
+copy e checklist — está em **`docs/DESIGN.md`, seção E2d**, que é normativa e **vence** o que este
+documento diz em caso de conflito. Aqui fica só o que é desta tela e corrige o que §1.1–§1.4
+escreveram em 16/09/2026.
+
+**A faixa, com os dois filtros e o filtro de despesas ligado:**
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│ Conta                  Tipo                                               │
+│ [Todas as contas   ▾]  [Despesas        ▾]                  Saiu 3.100,00 │
+│                                  Fora destes números: 2.000,00 em aportes │
+├───────────────────────────────────────────────────────────────────────────┤
+│ CONTA           CATEGORIA        DESCRIÇÃO                          VALOR │
+├───────────────────────────────────────────────────────────────────────────┤
+│ segunda, 31 de agosto                                              −29,00 │
+│ Conta corrente  Alimentação      Padaria Exemplo                   −29,00 │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Os dois `Select density="compact"` moram num `<div class="filtros">` (flex, `gap: var(--space-4)`;
+`var(--space-2)` abaixo de 40 rem) que substitui o `Select` solto como primeiro filho da `.faixa`.
+O resto da faixa não muda: `space-between`, filtros à esquerda, números à direita.
+
+**Correções à tabela de §1.2** (valem só sob o filtro indicado; em Tudo nada muda):
+
+| Item de §1.2 | Sob `tipo` |
+|---|---|
+| Subtotal do dia | **Não existe** em `transferencias` e em `investimentos` — o `trailing` do grupo é omitido. Transferência e investimento não mudam o patrimônio da casa; um `0,00` repetido em todo cabeçalho é resposta falsa, não total. |
+| Rótulo do dia (`· 1 transferência`) | Só em **Tudo**. Sob `transferencias` não há subtotal para explicar; nos outros três não há linha de transferência. |
+| Coluna Categoria | **Some** em `transferencias`: `Badge Transferência` em toda linha é o ruído de "escrever *Novo* 59 vezes" que §3.4 já recusou. |
+| Coluna nova `Movimento` | Só em `investimentos`: primeira coluna, `width: 'min'`, sem `hideBelow`, palavra `Aporte`/`Resgate` em `--ink`. Derivada do `kind` (`expense` = aporte, `income` = resgate), que o servidor garante parear com a natureza (spec 0006 §7.2). |
+| Coluna Valor | Em `investimentos`, **neutra e sem sinal** (E7 (b): aporte não é vermelho). Em `transferencias`, neutra **com** sinal, como hoje. Em `receitas`/`despesas`, como hoje. |
+| Entrou / Saiu / Resultado | Um número só em `receitas` e em `despesas`; frase sem número em `transferencias`; `Aportes · Resgates` em `investimentos`. Tabela completa em E2d (b). |
+
+**Acréscimos a §1.4 (estados)** — os textos exatos estão na tabela de copy de E2d (h):
+
+| Estado | Direção |
+|---|---|
+| **Vazio, filtro de tipo** | `EmptyState` por opção (`Nenhuma despesa em setembro.`), ação `Mostrar todos os tipos`. |
+| **Vazio, tipo + conta** | Título com os dois (`Nenhuma despesa na Nubank em setembro.`) e **dois** botões: `Mostrar todos os tipos` (primary) + `Mostrar todas as contas` (secondary). Adivinhar qual filtro a pessoa quis desfazer é pior do que oferecer os dois. |
+| **Vazio, sem-categoria + tipo** | `Todas as despesas de setembro estão categorizadas.` com saída `Mostrar todas as despesas` — o botão limpa só o `semCategoria`, e o rótulo não pode prometer mais do que isso. |
+| **Carregando** | `Skeleton` na quantidade do que vai aparecer: 3 em Tudo, 1 em receitas/despesas, 2 em investimentos, **nenhum** em transferências (a frase não depende de dado). |
+
+**Precedência dos vazios**: `semCategoria` → `tipo` → `conta`.
+
+**Busca da URL** — `?tipo=` é allowlist de quatro palavras em pt-BR (`receitas`, `despesas`,
+`transferencias`, `investimentos`), com o mesmo rigor de `mes` e `conta` (P4). E **`semCategoria`
+é descartado quando `tipo` é `transferencias` ou `investimentos`**, em `validarBusca` e em
+`aplicarNaBusca` — a mesma mecânica que já descarta `contraparte` sem `conta`. A combinação não tem
+resultado possível (transferência não tem categoria; aporte e resgate têm por definição), e uma URL
+colada não pode virar lista vazia sem saída.
+
+**Ordem de implementação desta emenda** (entra depois do item 4 de §9): (1) `?tipo=` em
+`app/search.ts` com o descarte acima e teste; (2) `tipo` no filtro, na chave da query e na
+`chaveDaBusca` do editor de categoria; (3) faixa do mês por opção; (4) subtotal do dia e rótulo do
+dia; (5) faixa de pendência, `caption`, apoio, `document.title` e vazios; (6) colunas de
+`transferencias` e `investimentos`; (7) a segunda frase do toast. Antes de (3), confirmar **P5**.
 
 ---
 

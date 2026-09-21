@@ -916,3 +916,114 @@ func TestMigrateMantemOSchemaV4ComAsNaturezasDeInvestimento(t *testing.T) {
 	assert.EqualValues(t, 2_000_00, resumo.InvestedCents)
 	assert.EqualValues(t, 1, resumo.Count, "e continua aparecendo na lista do mês")
 }
+
+// --- schema v4 continua v4: o filtro de tipo (spec 0004 §12, emenda E2d) ---
+
+// Irmão de TestMigrateMantemOSchemaV4ComAsNaturezasDeInvestimento, e não uma
+// repetição dele.
+//
+// O teste do E7 já prova que o AutoMigrate não emite DDL, e continuaria
+// provando depois do E2d — ele lê `gormstore.Models()` em tempo de execução,
+// então um índice novo apareceria lá como um CREATE INDEX. O que ele NÃO faz é
+// amarrar a afirmação ao E2d: se um dia a E7 for reescrita ou removida, some
+// junto a única prova de que o filtro de tipo não pediu objeto nenhum.
+//
+// E há uma segunda coisa, que nenhum teste de migração cobria: que as
+// consultas NOVAS rodam contra o banco JÁ MIGRADO sem precisar de nada que
+// não exista. Um índice faltando não quebra a consulta (ela fica lenta), mas
+// uma coluna faltando quebra — e é isso que as quatro chamadas abaixo
+// verificam, com o banco de quem já usa o app.
+func TestMigrateMantemOSchemaV4ComOFiltroDeTipo(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "v4-com-filtro-de-tipo.db")
+	ctx := t.Context()
+	db := openSQLite(t, path)
+	agora := time.Now().UTC().Truncate(time.Second)
+
+	require.NoError(t, storage.Migrate(ctx, db, nil, gormstore.Models()...))
+
+	users := gormstore.NewUserRepository(db)
+	households := gormstore.NewHouseholdRepository(db)
+	categories := gormstore.NewCategoryRepository(db)
+	accounts := gormstore.NewAccountRepository(db)
+	transactions := gormstore.NewTransactionRepository(db)
+
+	require.NoError(t, users.Create(ctx, &user.User{
+		ID: "u-e2d", Email: "antigo-e2d@exemplo.test", PasswordHash: "hash", Name: "Antigo",
+		CreatedAt: agora, UpdatedAt: agora,
+	}))
+	require.NoError(t, households.Create(ctx, &household.Household{
+		ID: "h-e2d", Name: "Casa do v4", Timezone: household.DefaultTimezone,
+		Currency: household.DefaultCurrency, CreatedAt: agora, UpdatedAt: agora,
+	}))
+	require.NoError(t, accounts.Create(ctx, &account.Account{
+		ID: "a-e2d", HouseholdID: "h-e2d", Name: "Conta Corrente", NameNorm: "conta corrente",
+		Kind: account.KindChecking, OpeningBalanceCents: 100_00, OpeningDate: civil.MustNew(2026, 1, 1),
+		Institution: account.InstitutionOther, CreatedAt: agora, UpdatedAt: agora,
+	}))
+	require.NoError(t, categories.Create(ctx, &category.Category{
+		ID: "c-e2d-inv", HouseholdID: "h-e2d", Name: "Aportes", NameNorm: "aportes",
+		Kind: category.KindInvestment, CreatedAt: agora, UpdatedAt: agora,
+	}))
+
+	invE2D := "c-e2d-inv"
+	require.NoError(t, transactions.CreateBatch(ctx, "h-e2d", []transaction.Transaction{
+		{
+			ID: "t-e2d-aporte", HouseholdID: "h-e2d", Kind: transaction.KindExpense, AccountID: "a-e2d",
+			CategoryID: &invE2D, AmountCents: 2_000_00, Description: "CDB 15 DIAS",
+			DescriptionNorm: "cdb 15 dias", OccurredOn: civil.MustNew(2026, 9, 5),
+			CompetenceMonth: "2026-09", Source: transaction.SourceManual,
+			DedupKey: "chave-e2d-1", DedupOrdinal: 1, CreatedBy: "u-e2d", CreatedAt: agora, UpdatedAt: agora,
+		},
+		{
+			// SEM categoria: é a linha que `NULL NOT IN (…)` esconderia.
+			ID: "t-e2d-sem-categoria", HouseholdID: "h-e2d", Kind: transaction.KindExpense, AccountID: "a-e2d",
+			AmountCents: 30_00, Description: "PADARIA", DescriptionNorm: "padaria",
+			OccurredOn: civil.MustNew(2026, 9, 6), CompetenceMonth: "2026-09",
+			Source: transaction.SourceManual, DedupKey: "chave-e2d-2", DedupOrdinal: 1,
+			CreatedBy: "u-e2d", CreatedAt: agora, UpdatedAt: agora,
+		},
+	}))
+
+	// (a) Duas subidas seguidas com o código do E2d: NENHUM comando de
+	// alteração de schema. Não é "não deu erro" — é a lista de DDL, vazia.
+	spy := espiarDDL(t, db)
+	require.NoError(t, storage.Migrate(ctx, db, nil, gormstore.Models()...))
+	require.NoError(t, storage.Migrate(ctx, db, nil, gormstore.Models()...))
+	require.Empty(t, spy.emitidos(),
+		"o filtro de tipo não muda o schema: nem tabela, nem coluna, nem ÍNDICE")
+
+	// (b) Os quatro grupos rodam contra o banco migrado, sem objeto novo.
+	marcadas := []string{"c-e2d-inv"}
+	for _, caso := range []struct {
+		grupo     string
+		marcadas  []string
+		esperados []string
+	}{
+		{transaction.KindGroupExpense, marcadas, []string{"t-e2d-sem-categoria"}},
+		{transaction.KindGroupIncome, marcadas, nil},
+		{transaction.KindGroupTransfer, nil, nil},
+		{transaction.KindGroupInvestment, marcadas, []string{"t-e2d-aporte"}},
+	} {
+		linhas, err := transactions.List(ctx, "h-e2d", transaction.ListFilter{
+			CompetenceMonth: "2026-09", KindGroup: caso.grupo, InvestmentCategoryIDs: caso.marcadas,
+		})
+		require.NoErrorf(t, err, "grupo %q", caso.grupo)
+
+		ids := make([]string, 0, len(linhas))
+		for i := range linhas {
+			ids = append(ids, linhas[i].ID)
+		}
+		assert.ElementsMatchf(t, caso.esperados, ids, "grupo %q", caso.grupo)
+
+		_, err = transactions.Summary(ctx, "h-e2d", transaction.SummaryFilter{
+			CompetenceMonth: "2026-09", KindGroup: caso.grupo, InvestmentCategoryIDs: caso.marcadas,
+		})
+		require.NoErrorf(t, err, "resumo do grupo %q", caso.grupo)
+	}
+
+	// (c) E o AutoMigrate continua sem nada a fazer DEPOIS das consultas — a
+	// leitura não cria objeto nenhum pelas costas.
+	assert.Empty(t, spy.emitidos())
+}

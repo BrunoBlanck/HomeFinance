@@ -102,6 +102,22 @@ func (s *Service) Analyze(ctx context.Context, ator Actor, in AnalyzeInput) (Bat
 	if err != nil {
 		return BatchView{}, err
 	}
+	// ⚠️ DAQUI PARA BAIXO, A CONTA É `conta.ID` — NUNCA `in.AccountID`.
+	//
+	// A posse do id é conferida em SQL (`WHERE id = ?`), e a semântica dessa
+	// igualdade vem da COLLATION da coluna; a IDENTIDADE dele, depois, é
+	// comparada em Go, byte a byte (o recorte crédito/débito do relatório e o
+	// painel casam `account_id` contra as contas da casa num mapa). As duas
+	// não concordam: `varchar(36)` sem collation declarada é
+	// `utf8mb4_0900_ai_ci` no MySQL 8 (ignora caixa) e `CI_AS` com padding
+	// ANSI no MSSQL (ignora espaço à direita). Guardar a string do CLIENTE
+	// gravaria `"<uuid>   "` numa linha que o `ByID` aceitou, e a partir daí
+	// nenhum mapa em Go encontraria a conta: o gasto sumiria do quadro
+	// "Despesas no crédito" em silêncio e para sempre.
+	//
+	// `conta.ID` é o id CANÔNICO — o que o banco devolveu —, e é ele que entra
+	// no lote, na deduplicação e em tudo que o confirm escrever depois.
+	accountID := conta.ID
 
 	// --- contêiner: ZIP (com ou sem senha) ou CSV solto -------------------
 	if err := conferirPrazo(ctx, "abrindo o contêiner"); err != nil {
@@ -160,7 +176,7 @@ func (s *Service) Analyze(ctx context.Context, ator Actor, in AnalyzeInput) (Bat
 	if err := conferirPrazo(ctx, "deduplicando linhas"); err != nil {
 		return BatchView{}, err
 	}
-	analise, err := s.analisar(ctx, ator.HouseholdID, in.AccountID, string(res.Institution),
+	analise, err := s.analisar(ctx, ator.HouseholdID, accountID, string(res.Institution),
 		linhasDedup, res.MinDate, res.MaxDate)
 	if err != nil {
 		return BatchView{}, err
@@ -196,7 +212,7 @@ func (s *Service) Analyze(ctx context.Context, ator Actor, in AnalyzeInput) (Bat
 	lote := &Batch{
 		ID:            s.ids(),
 		HouseholdID:   ator.HouseholdID,
-		AccountID:     in.AccountID,
+		AccountID:     accountID,
 		CreatedBy:     ator.UserID,
 		Institution:   string(res.Institution),
 		DocKind:       string(res.DocKind),

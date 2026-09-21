@@ -11,6 +11,7 @@ import (
 
 	"github.com/brunorblanck/homefinance/backend/internal/cardstatement"
 	"github.com/brunorblanck/homefinance/backend/internal/civil"
+	"github.com/brunorblanck/homefinance/backend/internal/id"
 	"github.com/brunorblanck/homefinance/backend/internal/importer/archive"
 	"github.com/brunorblanck/homefinance/backend/internal/importer/csvtext"
 	"github.com/brunorblanck/homefinance/backend/internal/importer/dedup"
@@ -237,6 +238,24 @@ func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
 		DefaultCategoryID: body.DefaultCategoryID,
 	}
 	for _, d := range *body.Decisions {
+		// `counterpartAccountId` é o ÚNICO id de conta que este corpo carrega,
+		// e a FORMA dele é conferida aqui, na borda, antes de virar
+		// `WHERE id = ?`. Vazio continua legítimo (a análise pode ter sugerido
+		// a contraparte); presente e fora da forma canônica é 400 no campo,
+		// com a mensagem da AÇÃO e sem eco nenhum do valor recusado (S8).
+		//
+		// O que isto fecha: o id com espaço à direita, que o MSSQL casa por
+		// padding ANSI e que seria GRAVADO com o espaço na perna da
+		// transferência — a partir daí a conta some de todo mapa em Go (o
+		// recorte crédito/débito do relatório, o painel, o nome na listagem).
+		// A caixa trocada não é fechada aqui, porque é forma canônica válida:
+		// quem a fecha é a canonização de `canonizarContas`, no confirm.
+		if d.CounterpartAccountID != "" && !id.IsCanonical(d.CounterpartAccountID) {
+			httpserver.WriteValidationError(w, map[string]string{
+				"counterpartAccountId": "Escolha a conta da outra perna.",
+			})
+			return
+		}
 		in.Decisions = append(in.Decisions, Decision{
 			RowID:                d.RowID,
 			Action:               d.Action,

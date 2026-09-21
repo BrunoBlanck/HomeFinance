@@ -80,6 +80,7 @@ type Transactor interface {
 // Service concentra a regra de negócio das contas.
 type Service struct {
 	repo     Repository
+	appender KeywordAppender
 	calendar Calendar
 	tx       Transactor
 	audit    Auditor
@@ -87,6 +88,15 @@ type Service struct {
 	balances Balances
 	ids      id.Generator
 	clock    func() time.Time
+}
+
+// KeywordAppender é a escrita ADITIVA de palavras-chave de conta — a única
+// que o import de IA usa. Interface separada de Repository pelas mesmas
+// razões da irmã em internal/category (ver category.KeywordAppender);
+// gormstore.AccountRepository a satisfaz, e a montagem é por
+// WithKeywordAppender, em cmd/api.
+type KeywordAppender interface {
+	AppendKeywords(ctx context.Context, householdID, accountID string, kws []Keyword) error
 }
 
 // Option configura o Service.
@@ -102,6 +112,10 @@ func WithClock(c func() time.Time) Option { return func(s *Service) { s.clock = 
 // deliberado: os testes de unidade não precisam de auditoria para exercitar
 // regra de negócio. Em produção ele é ligado em cmd/api/main.go.
 func WithAudit(a Auditor) Option { return func(s *Service) { s.audit = a } }
+
+// WithKeywordAppender liga a escrita aditiva de palavras-chave (o import de
+// IA). Sem ela, AppendKeywords devolve erro.
+func WithKeywordAppender(a KeywordAppender) Option { return func(s *Service) { s.appender = a } }
 
 // WithUsageCheckers registra quem sabe dizer se uma conta está em uso. Na E2 o
 // repositório de lançamentos entra por aqui, via transaction.NewUsageChecker.
@@ -711,6 +725,69 @@ func norms(kws []Keyword) []string {
 		out = append(out, k.Norm)
 	}
 	return out
+}
+
+// AppendKeywords ACRESCENTA palavras-chave a UMA conta da casa do token,
+// DENTRO da transação que o chamador já abriu — o gêmeo de
+// category.Service.AppendKeywords, extraído para o import de IA (spec 0010
+// §10.4) e reusando registrar sem alterar uma linha.
+//
+// Acrescenta, e não substitui, pelo motivo de corrida do achado A2 da revisão
+// da E9b (ver o doc da irmã): sem DELETE, o índice único decide a colisão e
+// nenhuma palavra comitada por outra transação some. Não abre transação e não
+// tem retentativa; as guardas de forma são defesa em profundidade e nunca
+// ecoam a palavra; ByID reconfere que a conta é da casa do ator; Position é
+// numerada pelo banco.
+//
+// `action` é a ação de auditoria gravada (audit.ActionAccountUpdated no
+// import): o evento que já existia, sem as palavras.
+func (s *Service) AppendKeywords(ctx context.Context, ator Actor, accountID string, kws []Keyword, action string) error {
+	householdID := ator.HouseholdID
+	if householdID == "" {
+		return ErrNotFound
+	}
+	if action == "" {
+		return fmt.Errorf("acrescentando palavras-chave: ação de auditoria ausente")
+	}
+	if s.appender == nil {
+		return fmt.Errorf("acrescentando palavras-chave: escrita aditiva não configurada")
+	}
+	if len(kws) == 0 {
+		return nil
+	}
+	if len(kws) > MaxKeywordsPerOwner {
+		return fmt.Errorf("%w: máximo de %d", ErrTooManyKeywords, MaxKeywordsPerOwner)
+	}
+	vistas := make(map[string]struct{}, len(kws))
+	for i := range kws {
+		if kws[i].Keyword == "" || kws[i].Norm == "" {
+			return &KeywordValidationError{Index: i, Err: ErrInvalidKeyword}
+		}
+		if _, repetida := vistas[kws[i].Norm]; repetida {
+			return &KeywordValidationError{Index: i, Err: ErrDuplicateKeyword}
+		}
+		vistas[kws[i].Norm] = struct{}{}
+	}
+
+	current, err := s.repo.ByID(ctx, householdID, accountID)
+	if err != nil {
+		return err
+	}
+	now := s.clock()
+	for i := range kws {
+		kws[i].ID = s.ids()
+		kws[i].HouseholdID = householdID
+		kws[i].AccountID = current.ID
+		kws[i].CreatedAt = now
+	}
+	if err := s.appender.AppendKeywords(ctx, householdID, current.ID, kws); err != nil {
+		return err
+	}
+	current.UpdatedAt = now
+	if err := s.repo.Update(ctx, current); err != nil {
+		return err
+	}
+	return s.registrar(ctx, ator, action, current.ID)
 }
 
 // palavrasPorDona carrega as palavras-chave da casa em UMA consulta e as

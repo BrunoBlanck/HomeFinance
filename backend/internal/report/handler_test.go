@@ -3,12 +3,14 @@ package report_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/brunorblanck/homefinance/backend/internal/account"
 	"github.com/brunorblanck/homefinance/backend/internal/category"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/httpserver"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/logging"
@@ -88,7 +90,6 @@ func TestHandlerMesInvalidoEh400(t *testing.T) {
 		"espaço à frente": "/api/v1/reports/by-category?month=%202026-09",
 		"NUL no fim":      "/api/v1/reports/by-category?month=2026-09%00",
 		"barra":           "/api/v1/reports/by-category?month=2026%2F09",
-		"repetido":        "/api/v1/reports/by-category?month=2026-13&month=2026-09",
 	}
 	var mensagens []string
 	for nome, alvo := range casos {
@@ -178,18 +179,18 @@ func TestHandlerFormaDoJSON(t *testing.T) {
 		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09")
 		require.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
-		assert.JSONEq(t, `{"month":"2026-09","kind":"expense","totalCents":0,"count":0,"items":[]}`, rec.Body.String())
+		assert.JSONEq(t, `{"month":"2026-09","kind":"expense","accountGroup":null,"totalCents":0,"count":0,"items":[]}`, rec.Body.String())
 	})
 
 	t.Run("com balde e grupo sem filha", func(t *testing.T) {
 		a := novoHTTPAmbiente(t)
 		g := a.categoria(minhaCasa, "11111111-1111-7111-8111-000000000001", "Casa", category.KindExpense, nil, false)
-		a.ledger.rows = []report.CategoryTotal{linha(ptr(g.ID), 3_000, 1), linha(nil, 1_000, 2)}
+		a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(g.ID), 3_000, 1), linha(nil, 1_000, 2)}
 
 		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09")
 		require.Equal(t, http.StatusOK, rec.Code)
 		assert.JSONEq(t, `{
-			"month":"2026-09","kind":"expense","totalCents":4000,"count":3,
+			"month":"2026-09","kind":"expense","accountGroup":null,"totalCents":4000,"count":3,
 			"items":[
 				{"categoryId":"11111111-1111-7111-8111-000000000001","name":"Casa","archivedAt":null,
 				 "totalCents":3000,"count":1,"shareBp":7500,
@@ -203,7 +204,7 @@ func TestHandlerFormaDoJSON(t *testing.T) {
 		// DTO dedicado, nunca a entidade).
 		var bruto map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &bruto))
-		assert.ElementsMatch(t, []string{"month", "kind", "totalCents", "count", "items"}, chaves(bruto))
+		assert.ElementsMatch(t, []string{"month", "kind", "accountGroup", "totalCents", "count", "items"}, chaves(bruto))
 		item := bruto["items"].([]any)[0].(map[string]any)
 		assert.ElementsMatch(t, []string{"categoryId", "name", "archivedAt", "totalCents", "count", "shareBp",
 			"directCents", "directCount", "directShareBp", "children"}, chaves(item))
@@ -213,7 +214,7 @@ func TestHandlerFormaDoJSON(t *testing.T) {
 		a := novoHTTPAmbiente(t)
 		g := a.categoria(minhaCasa, "g", "Casa", category.KindExpense, nil, false)
 		f := a.categoria(minhaCasa, "f", "Luz", category.KindExpense, ptr(g.ID), true)
-		a.ledger.rows = []report.CategoryTotal{linha(ptr(f.ID), 3_000, 1)}
+		a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(f.ID), 3_000, 1)}
 
 		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09")
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -279,11 +280,14 @@ func TestHandlerErroInternoEhGenericoESemDadoNoLog(t *testing.T) {
 		assert.Contains(t, log, "somando lançamentos por categoria")
 	})
 
+	// O teto é ESTRUTURAL (ADR-032): (categorias + 1) × contas = 201 × 50 =
+	// 10 050 linhas. Uma a mais é 500 genérico, com a contagem no log.
 	t.Run("linhas demais", func(t *testing.T) {
 		a := novoHTTPAmbiente(t)
-		rows := make([]report.CategoryTotal, 0, category.MaxPerHousehold+2)
-		for i := 0; i < category.MaxPerHousehold+2; i++ {
-			id := strings.Repeat("a", 30) + string(rune('0'+i%10)) + string(rune('0'+(i/10)%10)) + string(rune('0'+(i/100)%10))
+		const teto = (category.MaxPerHousehold + 1) * account.MaxPerHousehold
+		rows := make([]report.CategoryAccountTotal, 0, teto+1)
+		for i := 0; i < teto+1; i++ {
+			id := strings.Repeat("a", 30) + fmt.Sprintf("%05d", i)
 			rows = append(rows, linha(ptr(id), 987_654_321, 1))
 		}
 		a.ledger.rows = rows
@@ -294,7 +298,7 @@ func TestHandlerErroInternoEhGenericoESemDadoNoLog(t *testing.T) {
 
 		log := a.logs.String()
 		assert.Contains(t, log, `"level":"ERROR"`)
-		assert.Contains(t, log, "202 linhas", "só a contagem")
+		assert.Contains(t, log, "10051 linhas", "só a contagem")
 		assert.NotContains(t, log, "987654321", "nunca centavos")
 		assert.NotContains(t, log, strings.Repeat("a", 30), "nem os ids das linhas")
 	})
@@ -307,7 +311,7 @@ func TestHandlerLogSemCentavosNemNomes(t *testing.T) {
 	a := novoHTTPAmbiente(t)
 
 	g := a.categoria(minhaCasa, "g-1", "Supermercado Preferido", category.KindExpense, nil, false)
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(g.ID), 123_456, 7),
 		linha(ptr("id-que-nao-e-da-casa"), 654_321, 1),
 	}
@@ -329,7 +333,7 @@ func TestHandlerLogSemCentavosNemNomes(t *testing.T) {
 func TestHandlerNaoEntraEmPanico(t *testing.T) {
 	t.Parallel()
 	a := novoHTTPAmbiente(t)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(""), 1, 1), linha(nil, 0, 0)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(""), 1, 1), linha(nil, 0, 0)}
 
 	assert.NotPanics(t, func() {
 		rec := a.chamar(t, minhaCasa, "/api/v1/reports/by-category?month=2026-09")

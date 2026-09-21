@@ -84,7 +84,10 @@ describe('AppShell', () => {
     renderApp()
 
     expect(await screen.findByText('Casa de Bruno')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Conta de Bruno Blanck' })).toBeInTheDocument()
+    // `Menu de {nome}`, e não `Conta de {nome}`: abaixo de 52rem este menu
+    // hospeda também o destino `/ia`, então ele deixou de ser só a conta
+    // (spec 0010 §10.6).
+    expect(screen.getByRole('button', { name: 'Menu de Bruno Blanck' })).toBeInTheDocument()
 
     const nav = screen.getByRole('navigation', { name: 'Seções do aplicativo' })
     expect(nav).toBeInTheDocument()
@@ -103,6 +106,10 @@ describe('AppShell', () => {
       'Relatórios',
       'Contas',
       'Categorias',
+      // `IA` é o ÚLTIMO, e é o primeiro item do grupo "ferramentas" (spec 0010
+      // §10.6): o que se usa de vez em quando vem depois do que se usa todo
+      // dia, separado por um filete.
+      'IA',
     ])
 
     // Item que não leva a lugar nenhum não é criado (docs/DESIGN.md): este só

@@ -1,0 +1,149 @@
+@layer components {
+  /* O `Panel` entra com `padding="none"` porque o `<pre>` e o `<summary>`
+     precisam encostar na borda; o recuo é declarado aqui, uma vez, e vale para
+     todos os blocos da seção. */
+  .secao {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-4);
+  }
+
+  .cabecalho {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .titulo {
+    font-family: var(--font-display);
+    font-size: var(--text-18);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .apoio {
+    max-inline-size: 72ch;
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  /* O aviso é PROSA: sem caixa, sem ícone, sem fundo tingido e sem
+     `--warning` (docs/DESIGN.md, spec 0010). O peso vem de onde ele está — em
+     cima de tudo — e da tinta cheia da primeira linha, que é a mais escura da
+     seção. Banner amarelo com ícone é o objeto que se aprende a pular. */
+  .aviso {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-inline-size: 72ch;
+  }
+
+  .avisoPrincipal {
+    font-size: var(--text-15);
+    line-height: 1.55;
+    color: var(--ink);
+
+    /* Os dois trechos em negrito são o que a pessoa lê se ler só metade: o que
+       vai no texto, e quem o envia. */
+    & strong {
+      font-weight: 600;
+    }
+  }
+
+  /* A linha que transforma susto em consentimento informado: o que NÃO vai. */
+  .avisoSecundario {
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  /* Uma linha, nunca três cartões com número gigante. `tabular-nums` para os
+     números não dançarem quando a janela muda. */
+  .estatisticas {
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .acoes {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  /* O `<output>` ocupa lugar só quando tem o que dizer: vazio, ele não empurra
+     os botões nem reserva uma faixa em branco ao lado deles. */
+  .resultado {
+    display: inline-flex;
+    align-items: center;
+    min-inline-size: 0;
+    font-size: var(--text-13);
+    line-height: 1.4;
+    color: var(--ink-muted);
+  }
+
+  /* `--accent` é a ÚNICA cor cromática desta tela junto de `--danger`: aqui não
+     há dinheiro, então `--income`, `--expense` e `--chart-*` não aparecem. */
+  .copiado {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--accent);
+  }
+
+  /* A caixa do texto sangra até a borda do painel: ela é o conteúdo, e um
+     recuo em volta de um bloco de 540 linhas só rouba largura. */
+  .texto {
+    margin-inline: calc(var(--space-4) * -1);
+    margin-block-end: calc(var(--space-4) * -1);
+    border-block-start: 1px solid var(--border);
+  }
+
+  .resumoDoTexto {
+    padding: var(--space-3) var(--space-4);
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .resumoDoTexto:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-offset) * -1);
+  }
+
+  /* **Papel, não terminal.** Fundo rebaixado, tinta normal do texto, nenhuma
+     cor de sintaxe: é um texto para ler e copiar, não código para depurar. A
+     monoespaçada é o único uso permitido de `--font-mono` nesta fatia — aqui
+     ela é semântica, porque o conteúdo vai inteiro para outro programa. */
+  .caixaDoTexto {
+    max-block-size: 22rem;
+    overflow: auto;
+    background-color: var(--surface-sunken);
+    border-block-start: 1px solid var(--border);
+  }
+
+  /* O anel de foco fica na CAIXA (que é quem rola e recebe o foco), nunca no
+     `<pre>`: dentro de um container com `overflow: auto`, um anel desenhado no
+     conteúdo rolaria junto e sairia da tela. */
+  .caixaDoTexto:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-offset) * -1);
+  }
+
+  .pre {
+    padding: var(--space-4);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: var(--text-13);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 2;
+  }
+}

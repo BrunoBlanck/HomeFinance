@@ -1,0 +1,20 @@
+@layer components {
+  /* `textarea.textarea`, e não `.textarea`: a regra precisa vencer a `.control`
+     do FieldShell (mesma camada, mesma especificidade de classe) sem depender
+     da ordem em que o bundler concatena os módulos. O elemento no seletor dá
+     o ponto a mais; foco e erro continuam com a `.control`, que é mais
+     específica nos estados (`:focus-visible`, `[aria-invalid]`). */
+  textarea.textarea {
+    /* Onze linhas de JSON à vista: o cabeçalho, uma categoria nova e o começo
+       das palavras — o bastante para ver se o que colou começa em `{`. */
+    min-block-size: 11rem;
+    padding-block: var(--space-2);
+    resize: vertical;
+    font-family: var(--font-mono);
+    font-size: var(--text-13);
+    line-height: 1.5;
+    /* Tabulação estreita: o JSON indentado pela IA costuma vir com 2 ou 4
+       espaços, e um tab de 8 empurraria o miolo para fora da caixa. */
+    tab-size: 2;
+  }
+}

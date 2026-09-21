@@ -1,0 +1,244 @@
+@layer components {
+  /* Cada bloco é uma faixa da seção, separada da anterior por BORDA — não é
+     um painel dentro do painel, nem um cartão. Sangra até a borda do
+     `Panel` (padding none) para a tabela encostar como a do prompt. */
+  .bloco {
+    display: flex;
+    flex-direction: column;
+    margin-inline: calc(var(--space-4) * -1);
+    border-block-start: 1px solid var(--border);
+  }
+
+  .cabecalhoDoBloco {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4) 0;
+  }
+
+  .tituloDoBloco {
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .apoio {
+    max-inline-size: 72ch;
+    padding: var(--space-1) var(--space-4) var(--space-3);
+    font-size: var(--text-13);
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  /* 1rem de caixa dentro de uma célula de 44px: o alvo efetivo de toque é a
+     altura da linha, não o desenho do quadradinho. */
+  .marca {
+    inline-size: 1rem;
+    block-size: 1rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  .marca:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+  }
+
+  /* Linha desmarcada: tinta apagada como REFORÇO. O portador do estado é a
+     caixa, que continua marcável e anunciada. */
+  .bloco tr[data-desmarcada="true"] td {
+    color: var(--ink-muted);
+  }
+
+  /* `Grupo > Folha`: o grupo recua, a folha salta. */
+  .caminho {
+    display: block;
+  }
+
+  .grupo {
+    color: var(--ink-muted);
+  }
+
+  .folha {
+    color: var(--ink);
+  }
+
+  /* A linha desmarcada apaga a folha também — senão ela continuaria
+     saltando numa linha que a pessoa acabou de cancelar. */
+  .bloco tr[data-desmarcada="true"] .folha {
+    color: var(--ink-muted);
+  }
+
+  /* `Grupo novo · natureza: despesa` e `já existia — as palavras vão para
+     ela`: uma segunda linha em texto, nunca uma etiqueta. */
+  .nota {
+    display: block;
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    line-height: 1.4;
+    color: var(--ink-muted);
+  }
+
+  /* As palavras citadas: `«padaria» · «panificadora»`. Texto, não ficha —
+     ficha é a linguagem de editar, e aqui nada se edita. */
+  .citadas {
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+
+  /* Abaixo de 40rem a coluna Palavras some e as palavras reaparecem como
+     terceira linha da célula Categoria. Mesmo mecanismo da `.secundaria` de
+     /lancamentos e da revisão da importação. */
+  .secundaria {
+    display: none;
+    margin-block-start: 2px;
+    font-size: var(--text-13);
+    line-height: 1.4;
+    color: var(--ink-muted);
+    /* Dentro de uma coluna `min` (nowrap) a linha secundária precisa poder
+       quebrar, senão um caminho longo alargaria a coluna inteira. */
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ausente {
+    color: var(--ink-muted);
+  }
+
+  /* O nome da conta ou o caminho da categoria, do servidor. Quebra: numa
+     coluna `min` o nome longo não pode esticar a tabela. */
+  .item {
+    color: var(--ink);
+    white-space: normal;
+  }
+
+  .motivo {
+    color: var(--ink-muted);
+    white-space: normal;
+  }
+
+  /* --- bloco B: o impacto medido ------------------------------------ */
+
+  /* `87 de 212`: número é texto, alinhado à direita, tabular. */
+  .impacto {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-muted);
+    white-space: nowrap;
+  }
+
+  .numero {
+    color: var(--ink);
+  }
+
+  /* O peso 600 é o único destaque do número — sem cor, para sobreviver ao
+     grayscale(1). */
+  .numero[data-atencao="true"] {
+    font-weight: 600;
+  }
+
+  /* A frase de atenção, em tinta cheia (é a decisão da linha), com o ícone em
+     `--warning-ink`: o ÚNICO uso cromático de aviso desta seção, junto do
+     filete abaixo. */
+  .atencao {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+    max-inline-size: 60ch;
+    margin-block-start: var(--space-1);
+    font-size: var(--text-13);
+    line-height: 1.45;
+    color: var(--ink);
+    white-space: normal;
+    font-variant-numeric: tabular-nums;
+
+    & svg {
+      flex: none;
+      margin-block-start: 2px;
+      color: var(--warning-ink);
+    }
+  }
+
+  /* O filete inset na primeira célula da linha de atenção — o mesmo filete
+     que a navegação lateral usa para o item corrente. Não é fundo tingido:
+     a linha continua sendo uma linha de tabela. */
+  .contas tr[data-atencao="true"] > td:first-child {
+    box-shadow: inset 2px 0 0 var(--warning);
+  }
+
+  /* --- bloco C: a <dl> ---------------------------------------------- */
+
+  /* A `<dl>` no estilo do resultado da importação: uma leitura vertical,
+     linhas separadas por borda. Aqui é volume, não decisão. */
+  .lista {
+    display: flex;
+    flex-direction: column;
+    padding-inline: var(--space-4);
+    padding-block-end: var(--space-2);
+  }
+
+  .linha {
+    display: grid;
+    grid-template-columns: minmax(12rem, 18rem) 1fr;
+    align-items: baseline;
+    gap: var(--space-4);
+    padding-block: var(--space-2);
+    font-size: var(--text-15);
+  }
+
+  .linha + .linha {
+    border-block-start: 1px solid var(--border);
+  }
+
+  .termo {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .definicao {
+    min-inline-size: 0;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+
+  /* --- o que não entra ---------------------------------------------- */
+
+  .fora {
+    margin-inline: calc(var(--space-4) * -1);
+    border-block-start: 1px solid var(--border);
+  }
+
+  .resumo {
+    padding: var(--space-3) var(--space-4);
+    font-family: var(--font-ui);
+    font-size: var(--text-15);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .resumo:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-offset) * -1);
+  }
+
+  .tabelaDeFora {
+    border-block-start: 1px solid var(--border);
+  }
+
+  @media (max-width: 40rem) {
+    .secundaria {
+      display: block;
+    }
+
+    /* A `<dl>` empilha: caminho em cima, palavras embaixo. */
+    .linha {
+      grid-template-columns: 1fr;
+      gap: var(--space-1);
+    }
+  }
+}

@@ -151,6 +151,26 @@ const (
 	ActionImportCreated   = "import.created"
 	ActionImportConfirmed = "import.confirmed"
 	ActionImportDiscarded = "import.discarded"
+
+	// ActionAiKeywordImportConfirmed registra UMA execução real de
+	// POST /ai/keyword-import/confirm (spec 0010, achado A8 da emenda §10): a
+	// entidade é a CASA (EntityHousehold) e o id é o household_id, porque o
+	// que a execução toca é a taxonomia da casa inteira, não um recurso só.
+	//
+	// ELA É O REGISTRO DE ORIGEM, e existe por isso. As escritas em si já
+	// geram os eventos de sempre — `category.created` por categoria criada,
+	// `category.updated`/`account.updated` por item que recebeu palavra —, mas
+	// nenhum deles sabe dizer que a mudança veio do import de IA. `audit.Entry`
+	// NÃO tem campo de metadados (é a ausência de campo livre que impede
+	// alguém de escrever um código OTP aqui), e a §7 da spec proíbe coluna
+	// nova; então a origem vira um EVENTO próprio, no molde de
+	// `transaction.transfers_detected`: uma entrada por execução, ladeando as
+	// dos itens, e a correlação se faz por household_id e instante.
+	//
+	// Uma entrada por EXECUÇÃO, nunca uma por palavra — e as palavras-chave
+	// não entram aqui de jeito nenhum (spec 0005 §4.1). A prévia
+	// (`/ai/keyword-import/preview`) não gera entrada: não escreveu nada.
+	ActionAiKeywordImportConfirmed = "ai.keyword_import_confirmed"
 )
 
 // Entidades auditadas.

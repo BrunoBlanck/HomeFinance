@@ -276,13 +276,14 @@ func TestSementeTrazInvestimentosEResgates(t *testing.T) {
 	require.Len(t, arvore.Redemption, 1)
 	assert.Equal(t, "Resgates", arvore.Redemption[0].Name)
 
-	// E a semente continua idempotente com os dois grupos novos: o auto-reparo
-	// do login roda a cada entrada.
+	// E a semente continua idempotente com os dois grupos novos — agora com as
+	// folhas deles junto (ADR-033). Ela roda UMA vez por casa, na criação; a
+	// idempotência é defesa em profundidade, não rotina.
 	require.NoError(t, svc.SeedDefaults(ctx, minhaCasa))
 	require.NoError(t, svc.SeedDefaults(ctx, minhaCasa))
 	total, err := repo.CountAll(ctx, minhaCasa)
 	require.NoError(t, err)
-	assert.EqualValues(t, len(category.DefaultGroups()), total)
+	assert.EqualValues(t, category.DefaultCategoryCount(), total)
 }
 
 // COMPORTAMENTO ACEITO, FIXADO AQUI DE PROPÓSITO (ADR-029a + o achado do

@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useId, useRef, useState } from 'react'
 import { CheckIcon } from '@/components/icons/CheckIcon'
 import { ChevronDownIcon } from '@/components/icons/ChevronDownIcon'
 import { LogOutIcon } from '@/components/icons/LogOutIcon'
+import { PromptIcon } from '@/components/icons/PromptIcon'
 import { logout } from '@/lib/session'
 import {
   applyThemePreference,
@@ -29,6 +30,10 @@ function initialsOf(name: string): string {
 type UserMenuProps = {
   name: string
   email: string
+  /** O mês da casca (`?mes=`). Viaja junto no link de `/ia` — abaixo de 52rem
+   *  este menu é a ÚNICA porta para a tela, e uma porta que perde o mês
+   *  quebraria o eixo do app (ADR-019). */
+  mes: string
 }
 
 /** Painel flutuante com a Popover API nativa: light dismiss, ESC e devolução do
@@ -38,7 +43,7 @@ type UserMenuProps = {
  *  escrito à mão: com `<fieldset>` + `<input type="radio">` o navegador já dá
  *  roving tabindex, navegação por setas e seleção que segue o foco, exatamente
  *  o que o APG pede, sem uma linha de JavaScript de teclado. */
-export function UserMenu({ name, email }: UserMenuProps) {
+export function UserMenu({ name, email, mes }: UserMenuProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const rawId = useId()
@@ -82,7 +87,7 @@ export function UserMenu({ name, email }: UserMenuProps) {
         type="button"
         className={styles.trigger}
         popoverTarget={panelId}
-        aria-label={`Conta de ${name}`}
+        aria-label={`Menu de ${name}`}
       >
         <span className={styles.avatar} aria-hidden="true">
           {initialsOf(name)}
@@ -95,6 +100,31 @@ export function UserMenu({ name, email }: UserMenuProps) {
           <strong className={styles.name}>{name}</strong>
           <span className={styles.email}>{email}</span>
         </div>
+
+        {/* Abaixo de 52rem a barra inferior fecha em SETE células e a
+            ferramenta não ocupa nenhuma (docs/DESIGN.md, spec 0010 §10.6): o
+            destino mora aqui. Acima de 52rem estes dois nós saem da tela pelo
+            CSS — o item continua na lateral, e duas portas visíveis para o
+            mesmo lugar seriam duas marcas de "página atual". */}
+        <hr className={`${styles.divider} ${styles.soNoCelular}`} />
+
+        <Link
+          to="/ia"
+          search={{ mes }}
+          className={`${styles.item} ${styles.soNoCelular}`}
+          activeOptions={{ exact: false, includeSearch: false }}
+          activeProps={{ 'aria-current': 'page' }}
+          // `popover="auto"` fecha por light dismiss e por ESC, mas NÃO por
+          // clique DENTRO do painel: sem esta linha o menu ficaria aberto por
+          // cima da tela recém-aberta, tapando justamente o <h1> que acabou de
+          // receber o foco.
+          onClick={() => panelRef.current?.hidePopover()}
+        >
+          <span className={styles.mark} aria-hidden="true">
+            <PromptIcon size={16} />
+          </span>
+          <span>IA</span>
+        </Link>
 
         <hr className={styles.divider} />
 

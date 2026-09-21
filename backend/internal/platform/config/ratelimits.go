@@ -113,6 +113,60 @@ type RateLimits struct {
 	// em cima de um endpoint que escreve e audita a cada chamada.
 	TransactionUpdate Rule
 
+	// AiExport é o teto POR CASA de GET /ai/export-prompt (spec 0010 §8.6).
+	//
+	// É LEITURA pura — não escreve nada, não abre transação e não segura
+	// conexão do pool dentro de uma escrita —, mas não é barata: uma chamada
+	// agrega até 3 meses de lançamentos por `description_norm` (coluna sem
+	// índice próprio), lê contas e categorias da casa e monta um texto grande.
+	// 30/h é a mesma cota do confirm da importação, e chega para dezenas de
+	// exportações por dia.
+	//
+	// # O estouro é 6, e não 3 — o achado A1 se repetindo no balde novo
+	//
+	// A tela `/ia` pede UM prompt por par (mês do cabeçalho × tamanho da
+	// janela), com `staleTime: Infinity`: cada par é buscado uma vez e fica em
+	// cache. Explorar os TRÊS tamanhos de janela que a spec permite (1, 2 e 3
+	// meses) e depois trocar o mês do cabeçalho e explorar de novo são 3 × 2 =
+	// 6 requisições, em sequência, em segundos.
+	//
+	// Com estouro 3 a QUARTA era 429 DETERMINÍSTICO — medido pelo `qa-testes`
+	// em 21/09/2026, com `retry_after: 2m` —, e "Tentar de novo" também era
+	// negado, porque 30/h repõem 1 token a cada 2 minutos e ninguém espera dois
+	// minutos entre dois cliques. É literalmente o achado A1 da emenda §10 da
+	// spec 0010 (que subiu AutoCategorize e TransferDetect de 3 para 6) caindo
+	// de novo, agora no balde que nasceu depois dele.
+	//
+	// 6 é o MENOR número que faz o uso legítimo caber, não uma folga escolhida
+	// a olho: com 5, a última exploração da segunda janela já era negada. A
+	// cota horária de 30 fica intacta — o estouro é a rajada, não o teto —, e
+	// o balde continua finito: a 7ª chamada instantânea é 429, e isso está em
+	// teste. Segue 4× abaixo do pool de 25 conexões e 5× abaixo da cota.
+	AiExport Rule
+
+	// AiImportPreview é o teto POR CASA de POST /ai/keyword-import/preview
+	// (spec 0010 §8.6).
+	//
+	// 60/h, o dobro do confirm, pelo motivo de sempre neste projeto: o uso
+	// legítimo é iterativo — a pessoa cola o JSON, confere, ajusta, confere de
+	// novo —, e a prévia é a metade barata do par. Barata em escrita, não em
+	// CPU: ela roda o `internal/textmatch` sobre as descrições da janela para
+	// medir o impacto de cada palavra-chave de conta. Daí o estouro de 3, que
+	// transforma a rajada em fila sem estorvar quem confere duas ou três
+	// vezes seguidas.
+	AiImportPreview Rule
+
+	// AiImportConfirm é o teto POR CASA de POST /ai/keyword-import/confirm
+	// (spec 0010 §8.6).
+	//
+	// 30/h — metade da prévia, pela razão inversa: confirmar é o passo raro e
+	// o caro. Ele revalida tudo do zero e grava categorias e palavras-chave
+	// numa ÚNICA transação, então cada requisição em voo segura uma conexão do
+	// pool (25, por DB_MAX_OPEN_CONNS) até terminar. O estouro de 3 é o mesmo
+	// achado A2 aplicado aqui: sem ele o estouro seria a cota inteira, e uma
+	// casa sozinha ocuparia o pool sem passar de limite nenhum.
+	AiImportConfirm Rule
+
 	// IdleTTL é o tempo que uma chave ociosa sobrevive no limitador, para o
 	// mapa não crescer sem fim (risco 9 da §9 da spec 0001).
 	IdleTTL time.Duration
@@ -188,26 +242,60 @@ func DefaultRateLimits() RateLimits {
 		// prévia + confirmação — o dobro do confirm da importação, na mesma
 		// janela, dá a mesma quantidade de USOS por hora.
 		//
-		// O ESTOURO é 3, igual ao TransferDetect e pelo mesmo motivo (achado
+		// O ESTOURO é 6, igual ao TransferDetect e pelo mesmo motivo (achado
 		// A2 da revisão de segurança): sem Burst, o estouro é a cota inteira —
 		// 60 execuções simultâneas de uma casa só, cada uma varrendo até
 		// 10.000 lançamentos e pontuando-os contra até 4.000 palavras-chave.
-		// Três de cada vez cobrem prévia + confirmação com folga para um
-		// reenvio e transformam a rajada em fila.
-		AutoCategorize: Rule{Requests: 60, Window: time.Hour, Burst: 3},
+		//
+		// POR QUE 6 E NÃO 3 (21/09/2026, decisão do usuário — achado A1 da
+		// emenda §10 da spec 0010): o "Reprocessar" do menu IA roda a janela
+		// de trabalho inteira, que é de até 3 MESES DE COMPETÊNCIA, mês a mês.
+		// A conta é fechada: a prévia gasta 3 chamadas neste balde (uma por
+		// mês, com dryRun) e a execução gasta outras 3 — 6 chamadas em
+		// sequência, em segundos. O balde repõe 1 token/min, então com estouro
+		// 3 a 4ª chamada tomaria 429 DETERMINÍSTICO: o botão nasceria quebrado
+		// para todo mundo, e não por abuso.
+		//
+		// 6 é o MENOR número que faz o uso legítimo caber — não uma folga
+		// escolhida a olho. Ele continua ~4× abaixo do pool de 25 conexões
+		// (DB_MAX_OPEN_CONNS) e 10× abaixo da cota de 60/h, então a defesa do
+		// A2 — impedir que uma casa sozinha ocupe o pool inteiro dentro da
+		// cota — segue de pé.
+		//
+		// ⚠️ Isto AMENDA um número fixado pelo achado A2 de uma revisão de
+		// segurança anterior e está PENDENTE DE RATIFICAÇÃO do
+		// `revisor-seguranca`. Não mexer sem passar por lá.
+		AutoCategorize: Rule{Requests: 60, Window: time.Hour, Burst: 6},
 
 		// Spec 0005 §13.1.8: o mesmo 60/h do auto-categorize, em balde
-		// separado — prévia + confirmação por uso. O ESTOURO, porém, é 3 e
+		// separado — prévia + confirmação por uso. O ESTOURO, porém, é 6 e
 		// não 60: a rota varre até 30.000 linhas e, na execução real, segura
-		// uma conexão do pool em transação aberta. Três de cada vez cobre o
-		// uso legítimo (prévia + confirmação, com folga para um reenvio) e
-		// impede que uma casa sozinha ocupe o pool inteiro (A2).
-		TransferDetect: Rule{Requests: 60, Window: time.Hour, Burst: 3},
+		// uma conexão do pool em transação aberta.
+		//
+		// O 6 é o mesmo do AutoCategorize, pela mesma aritmética e na mesma
+		// decisão de 21/09/2026: o "Reprocessar" do menu IA gasta 3 chamadas
+		// aqui na prévia e 3 na execução (a janela é de até 3 meses), e o
+		// balde repõe 1 token/min — com 3, a 4ª chamada era 429 garantido.
+		// Menor número que acomoda o uso legítimo, ~4× abaixo do pool de 25 e
+		// 10× abaixo da cota de 60/h.
+		//
+		// ⚠️ Amenda o achado A2 de revisão anterior; PENDENTE DE RATIFICAÇÃO
+		// do `revisor-seguranca`.
+		TransferDetect: Rule{Requests: 60, Window: time.Hour, Burst: 6},
 
 		// Spec 0006 §3.3.5: o mesmo 60/h das duas irmãs, em balde separado —
 		// prévia + confirmação por uso. O ESTOURO é 3 pelo motivo do campo:
 		// a execução real segura conexão do pool dentro da transação, e três
 		// de cada vez cobre o uso legítimo com folga para um reenvio.
+		//
+		// A DIVERGÊNCIA das irmãs (3 aqui, 6 nelas, desde 21/09/2026) é
+		// decisão, não descuido: o "Reprocessar" do menu IA encadeia
+		// `/transfers/detect` e `/transactions/auto-categorize` mês a mês na
+		// janela de 3 meses, e só esses dois baldes recebem 6 chamadas em
+		// sequência. `POST /investments/detect` não participa dessa
+		// orquestração — continua sendo prévia + confirmação de UM mês, que
+		// cabe em 3 —, e subir o estouro sem uso legítimo que o exija seria
+		// afrouxar de graça.
 		InvestmentDetect: Rule{Requests: 60, Window: time.Hour, Burst: 3},
 
 		// Emenda §11: o atalho de categoria é escrita de UMA linha, mas com
@@ -216,20 +304,43 @@ func DefaultRateLimits() RateLimits {
 		// uma sentada) com teto ainda assim finito — ver o comentário do campo.
 		TransactionUpdate: Rule{Requests: 120, Window: time.Hour},
 
+		// Spec 0010 §8.6 — os três baldes do menu IA, todos POR CASA.
+		//
+		// Eles são SEPARADOS entre si (e dos demais) pelo motivo que já vale
+		// para as rotas de detecção: exportar o prompt não pode trancar a
+		// conferência do JSON, e conferir não pode trancar o confirm. A pessoa
+		// usa os três na mesma sentada, em ordem, e um balde compartilhado
+		// faria o passo seguinte pagar pelo anterior.
+		//
+		// A relação entre os três é a mesma do resto do projeto: a metade
+		// barata e iterativa do par (a prévia) tem o dobro da cota da metade
+		// cara (o confirm). A exportação acompanha o confirm por ser agregação
+		// pesada que ninguém repete dezenas de vezes por hora.
+		// AiExport com estouro 6: a tela explora os três tamanhos de janela
+		// em dois meses de cabeçalho antes de a primeira reposição chegar
+		// (ver o doc do campo). Os outros dois seguem em 3 — o par de
+		// importação é colar/conferir/confirmar, não exploração.
+		AiExport:        Rule{Requests: 30, Window: time.Hour, Burst: 6},
+		AiImportPreview: Rule{Requests: 60, Window: time.Hour, Burst: 3},
+		AiImportConfirm: Rule{Requests: 30, Window: time.Hour, Burst: 3},
+
 		IdleTTL: time.Hour,
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Perfil de teste (decisão do usuário, 17/09/2026)
+// Perfis não-padrão: teste (17/09/2026) e desenvolvimento (18/09/2026) —
+// decisões do usuário
 // ---------------------------------------------------------------------------
 
 // Perfis de limite reconhecidos por RATE_LIMITS_PROFILE.
 //
-// São só DOIS, e não existe override por regra: o caminho pelo qual um limite
-// frouxo vaza para produção é sempre a variável solta ("só esta, só agora") que
-// alguém deixa no manifesto. Aqui o interruptor é único, explícito, nomeado, e
-// a configuração RECUSA o perfil frouxo em produção (config.validate).
+// São TRÊS perfis NOMEADOS, e continua não existindo override por regra: o
+// caminho pelo qual um limite frouxo vaza para produção é sempre a variável
+// solta ("só esta, só agora") que alguém deixa no manifesto. Aqui o
+// interruptor é único, explícito, nomeado, e a configuração AMARRA cada perfil
+// não-padrão ao seu ambiente (config.validate): `test` só sobe com
+// APP_ENV=test, `dev` só com APP_ENV=development, e produção recusa os dois.
 const (
 	// RateLimitProfileDefault são os limites de produção — o padrão quando a
 	// variável não existe.
@@ -237,6 +348,10 @@ const (
 	// RateLimitProfileTest é o perfil FROUXO da suíte automatizada. Nunca em
 	// produção: o boot falha se APP_ENV=production o encontrar.
 	RateLimitProfileTest = "test"
+	// RateLimitProfileDev é o perfil da MÁQUINA DE DESENVOLVIMENTO (decisão do
+	// usuário, 18/09/2026): os padrões de produção com os tetos da IMPORTAÇÃO
+	// elevados, e mais nada. Exige APP_ENV=development; produção recusa.
+	RateLimitProfileDev = "dev"
 )
 
 // testProfileRateLimits devolve o perfil FROUXO usado pela suíte automatizada.
@@ -308,6 +423,82 @@ func testProfileRateLimits() RateLimits {
 	rl.InvestmentDetect = Rule{Requests: 600, Window: time.Hour, Burst: 30}
 	rl.TransactionUpdate = Rule{Requests: 1200, Window: time.Hour}
 
+	// Menu IA (spec 0010). O E2E da tela `/ia` exporta o prompt, cola o JSON,
+	// confere, desmarca uma categoria e confirma — e repete isso por cenário,
+	// num robô só. Com os tetos de produção (30/h e 60/h, estouro 3) o
+	// Playwright levaria 429 intermitente, que é o pior tipo de vermelho: o
+	// que some quando alguém vai olhar.
+	//
+	// A FORMA é preservada, como nas irmãs: mesma janela do padrão, teto nunca
+	// menor, estouro positivo e sempre menor que a cota, e a relação entre os
+	// três mantida (a prévia continua com o dobro da cota do confirm).
+	rl.AiExport = Rule{Requests: 300, Window: time.Hour, Burst: 30}
+	rl.AiImportPreview = Rule{Requests: 600, Window: time.Hour, Burst: 30}
+	rl.AiImportConfirm = Rule{Requests: 300, Window: time.Hour, Burst: 30}
+
+	return rl
+}
+
+// devProfileRateLimits devolve o perfil da MÁQUINA DE DESENVOLVIMENTO: os
+// padrões de produção com UM grupo elevado — os tetos da IMPORTAÇÃO (decisão
+// do usuário, 18/09/2026).
+//
+// POR QUE EXISTE: em desenvolvimento o app roda com os limites de PRODUÇÃO (o
+// perfil frouxo é da suíte e só é aceito com APP_ENV=test). Os tetos da
+// importação são dimensionados para o uso real de uma casa — 10 arquivos por
+// hora —, e quem está construindo ou conferindo a feature sobe o mesmo extrato
+// dezenas de vezes numa tarde. O 429 aí não protege ninguém: só atrapalha o
+// autor.
+//
+// O QUE ELE NÃO É: o perfil de teste com outro nome. Ele NÃO toca em auth, no
+// global por IP, nas rotas de detecção nem em nada mais — quem depurar login,
+// cadastro ou código de 6 dígitos em desenvolvimento continua batendo nos
+// tetos de produção, que é exatamente onde esses limites precisam ser
+// exercitados à mão. O teste que trava isso campo a campo, por reflexão, é
+// TestPerfilDeDesenvolvimentoSobeSoAImportacao.
+//
+// DESENHO: a mesma FORMA das regras de importação, com a cota multiplicada por
+// 5. Janelas idênticas às do padrão e proporções preservadas de propósito (o
+// teto por IP é o dobro do teto por casa; o confirm é o triplo do upload), para
+// que isto continue sendo "os mesmos limites com folga" e não um desenho
+// paralelo que ninguém revisou.
+//
+// O ESTOURO é a parte que NÃO sobe, e é deliberado (achado F2 da revisão de
+// segurança de 18/09/2026). As três regras de importação não declaram Burst no
+// padrão, e Burst zero significa "estouro = cota" (ver o campo Burst): subir a
+// cota para 5x sem tocar no estouro deixaria 50 uploads e 150 confirms
+// SIMULTÂNEOS de uma casa só. O confirm segura uma conexão do pool dentro de
+// uma transação aberta (DB_MAX_OPEN_CONNS = 25), e cada operação de importação
+// empilha ~46 MiB de heap vivo (a conta está em internal/textmatch/matcher.go)
+// — é a forma exata do achado A2, aplicada a rotas que ele não cobria.
+//
+// Então o perfil fixa o estouro NA COTA DO PADRÃO: instantaneamente, uma casa
+// em desenvolvimento não consegue nada que ela já não conseguisse em produção
+// (10 uploads, 20 por IP, 30 confirms de uma vez); o que muda é quantas vezes
+// por hora ela pode repetir. Escrito como padrao.X.Requests e não como número
+// solto, para que mexer no padrão carregue o estouro junto.
+func devProfileRateLimits() RateLimits {
+	padrao := DefaultRateLimits()
+	rl := padrao
+
+	const fator = 5
+
+	rl.ImportUpload = Rule{
+		Requests: fator * padrao.ImportUpload.Requests,
+		Window:   padrao.ImportUpload.Window,
+		Burst:    padrao.ImportUpload.Requests,
+	}
+	rl.ImportUploadIP = Rule{
+		Requests: fator * padrao.ImportUploadIP.Requests,
+		Window:   padrao.ImportUploadIP.Window,
+		Burst:    padrao.ImportUploadIP.Requests,
+	}
+	rl.ImportConfirm = Rule{
+		Requests: fator * padrao.ImportConfirm.Requests,
+		Window:   padrao.ImportConfirm.Window,
+		Burst:    padrao.ImportConfirm.Requests,
+	}
+
 	return rl
 }
 
@@ -315,17 +506,22 @@ func testProfileRateLimits() RateLimits {
 //
 // NÃO é exportada (achado B3 da revisão de segurança): quem está fora do
 // pacote não tem por que montar um conjunto de limites por NOME DE PERFIL — o
-// caminho legítimo é Load/LoadFrom, que passa pela validação que recusa o
-// perfil frouxo fora de APP_ENV=test. O teste alcança esta função por
-// export_test.go, que só existe durante os testes deste pacote.
+// caminho legítimo é Load/LoadFrom, que passa pela validação que amarra cada
+// perfil não-padrão ao seu ambiente (`test` a APP_ENV=test, `dev` a
+// APP_ENV=development) e recusa os dois em produção. O teste alcança esta
+// função por export_test.go, que só existe durante os testes deste pacote.
 //
 // Perfil desconhecido devolve os PADRÕES — o lado seguro do erro. Isso NÃO é a
 // defesa: a validação da configuração recusa o boot com perfil desconhecido,
 // para que um erro de digitação em RATE_LIMITS_PROFILE apareça como falha e
 // não como comportamento silencioso.
 func profileRateLimits(profile string) RateLimits {
-	if profile == RateLimitProfileTest {
+	switch profile {
+	case RateLimitProfileTest:
 		return testProfileRateLimits()
+	case RateLimitProfileDev:
+		return devProfileRateLimits()
+	default:
+		return DefaultRateLimits()
 	}
-	return DefaultRateLimits()
 }

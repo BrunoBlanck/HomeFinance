@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DashboardSummary } from '@/api/types'
 import { createAppRouter } from '@/app/router'
 
 const fetchMock = vi.fn()
@@ -40,6 +41,38 @@ function jsonResponse(status: number, body: unknown) {
   })
 }
 
+/** O painel pede o resumo do mês junto com a sessão (spec 0008). O menu não se
+ *  importa com estes números — mas o app montado inteiro sim, e uma faixa
+ *  quebrada no cabeçalho não pode falsear um teste de menu. */
+const RESUMO_DO_MES: DashboardSummary = {
+  month: '2026-09',
+  incomeCents: 0,
+  incomeCount: 0,
+  creditCardExpenseCents: 0,
+  creditCardExpenseCount: 0,
+  investmentNetCents: 0,
+  investmentCount: 0,
+  creditCardAccountCount: 1,
+  investmentCategoryCount: 1,
+}
+
+/** Uma resposta NOVA a cada chamada, roteada pelo caminho.
+ *
+ *  `mockResolvedValue(jsonResponse(...))` devolvia o MESMO `Response` a todas
+ *  as chamadas, e o corpo de um `Response` só pode ser lido uma vez. Enquanto a
+ *  Home fazia um pedido só, isso não aparecia; com o `/dashboard` do painel ao
+ *  lado do `/me`, quem lesse em segundo lugar recebia corpo vazio — e o teste
+ *  falhava longe da causa. */
+function responderApi() {
+  fetchMock.mockImplementation((entrada: string) => {
+    const url = new URL(String(entrada), 'https://app.invalido')
+    if (url.pathname.endsWith('/dashboard')) {
+      return Promise.resolve(jsonResponse(200, RESUMO_DO_MES))
+    }
+    return Promise.resolve(jsonResponse(200, SESSAO))
+  })
+}
+
 function callsTo(path: string): unknown[][] {
   return fetchMock.mock.calls.filter((call) => String(call[0]).endsWith(path))
 }
@@ -47,7 +80,7 @@ function callsTo(path: string): unknown[][] {
 /** O menu vive no cabeçalho da Home; montar o app inteiro é o que exercita o
  *  caminho real — inclusive a navegação de saída, que depende do roteador. */
 async function renderMenuAberto() {
-  fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+  responderApi()
   const router = createAppRouter(createMemoryHistory({ initialEntries: ['/'] }))
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -59,7 +92,7 @@ async function renderMenuAberto() {
   )
 
   const user = userEvent.setup()
-  const gatilho = await screen.findByRole('button', { name: 'Conta de Bruno Blanck' })
+  const gatilho = await screen.findByRole('button', { name: 'Menu de Bruno Blanck' })
   await user.click(gatilho)
   return { user, router, queryClient, gatilho }
 }
@@ -79,7 +112,7 @@ describe('UserMenu', () => {
   })
 
   it('nomeia o gatilho pela pessoa, não por "menu"', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+    responderApi()
     const router = createAppRouter(createMemoryHistory({ initialEntries: ['/'] }))
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -89,7 +122,7 @@ describe('UserMenu', () => {
     )
 
     // Um botão chamado "menu" não diz nada a quem navega por lista de botões.
-    expect(await screen.findByRole('button', { name: 'Conta de Bruno Blanck' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Menu de Bruno Blanck' })).toBeInTheDocument()
   })
 
   it('mostra nome e e-mail ao abrir', async () => {
@@ -213,4 +246,44 @@ describe('UserMenu', () => {
 
     await waitFor(() => expect(queryClient.getQueryData(['session'])).toBeUndefined())
   })
+
+  /** O destino `/ia` mora aqui porque a barra inferior do celular fecha em SETE
+   *  células (docs/DESIGN.md, spec 0010 §10.6): ferramenta não ocupa célula.
+   *
+   *  A fronteira de 52rem é CSS e se verifica no Playwright, em navegador de
+   *  verdade. O que se afirma aqui é o que o jsdom sabe responder: o link
+   *  existe, leva o mês junto e fecha o menu ao ser clicado. */
+  it('oferece o destino IA, com o mês da casca junto', async () => {
+    await renderMenuAberto()
+
+    // Escopado ao PAINEL: o item da lateral também se chama `IA`, e no jsdom
+    // (que não aplica a media query) os dois estão na árvore ao mesmo tempo.
+    const ia = within(painelDoMenu()).getByRole('link', { name: 'IA' })
+    expect(ia).toHaveAttribute('href', expect.stringContaining('/ia'))
+    expect(ia.getAttribute('href')).toContain('mes=')
+  })
+
+  /** `popover="auto"` fecha por light dismiss e por ESC, mas **não** por clique
+   *  DENTRO do painel. Sem o `hidePopover()` à mão, o menu ficaria aberto por
+   *  cima da tela recém-aberta — tapando justamente o `<h1>` que acabou de
+   *  receber o foco. */
+  it('clicar em IA navega e fecha o menu', async () => {
+    const { user, router } = await renderMenuAberto()
+
+    await user.click(within(painelDoMenu()).getByRole('link', { name: 'IA' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/ia'))
+    // Fechado: o painel some da árvore acessível, como nos casos de ESC e de
+    // clique fora acima.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Sair' })).not.toBeInTheDocument(),
+    )
+  })
 })
+
+/** O painel flutuante do menu — o `[popover]` que contém o botão Sair. */
+function painelDoMenu(): HTMLElement {
+  const painel = screen.getByRole('button', { name: 'Sair' }).closest('[popover]')
+  if (!painel) throw new Error('o painel do menu não está aberto')
+  return painel as HTMLElement
+}

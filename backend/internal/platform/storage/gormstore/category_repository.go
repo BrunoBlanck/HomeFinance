@@ -408,6 +408,91 @@ func (r *CategoryRepository) ReplaceKeywords(ctx context.Context, householdID, c
 	return nil
 }
 
+// keywordTally é a projeção de UMA consulta agregada sobre as palavras de uma
+// dona: quantas há e a maior posição — o que AppendKeywords precisa para
+// continuar a numeração e reconferir o teto na transação em curso.
+type keywordTally struct {
+	Total       int64
+	MaxPosition int
+}
+
+// keywordTallyProjecao é constante: nenhuma entrada do usuário entra no
+// Select (docs/SEGURANCA.md §3). COALESCE(MAX(..), -1) devolve -1 numa dona
+// sem palavra, para a primeira posição ser 0.
+const keywordTallyProjecao = "COUNT(*) AS total, COALESCE(MAX(position), -1) AS max_position"
+
+// AppendKeywords ACRESCENTA palavras-chave à categoria, na transação em
+// curso — sem apagar nada. É a escrita do import de IA (spec 0010 §4.2), e
+// existe ao lado de ReplaceKeywords por um motivo de corrida (achado A2 da
+// revisão de segurança da E9b):
+//
+// ReplaceKeywords é DELETE + INSERT da lista inteira montada de um índice
+// lido antes. Em READ COMMITTED (PostgreSQL, MySQL, MSSQL), uma palavra
+// comitada por OUTRA transação entre a leitura e a escrita é apagada pelo
+// DELETE e não volta no INSERT — some sem erro, numa operação anunciada como
+// aditiva. Inserindo só as novas, não há DELETE, e o índice único
+// (household_id, keyword_norm) decide a corrida: colisão volta como
+// ErrKeywordTaken, nunca como perda silenciosa.
+//
+// Position CONTINUA a numeração atual: MAX(position)+1 é lido aqui, na
+// mesma transação, e não do índice do chamador — o que também fecha a
+// numeração contra a mesma corrida. O teto por dona (MaxKeywordsPerOwner) é
+// reconferido contra COUNT(*) vivo; passar dele é ErrTooManyKeywords.
+//
+// Os testes de corrida do import rodam com MaxOpenConns: 1 (SQLite, em
+// arquivo): as transações serializam no Begin e a intercalação real leitura →
+// escrita alheia → escrita não é reproduzida ali. A prova da intercalação
+// fica para a suíte de testcontainers com PostgreSQL.
+func (r *CategoryRepository) AppendKeywords(ctx context.Context, householdID, categoryID string, kws []category.Keyword) error {
+	if householdID == "" || categoryID == "" {
+		return fmt.Errorf("acrescentar palavras-chave exige casa e categoria")
+	}
+	if len(kws) == 0 {
+		return nil
+	}
+
+	models := make([]CategoryKeyword, 0, len(kws))
+	for i := range kws {
+		k := kws[i]
+		if k.HouseholdID != "" && k.HouseholdID != householdID {
+			return fmt.Errorf("palavra-chave de outra casa na lista")
+		}
+		if k.CategoryID != "" && k.CategoryID != categoryID {
+			return fmt.Errorf("palavra-chave de outra categoria na lista")
+		}
+		if k.ID == "" || k.Keyword == "" || k.Norm == "" {
+			return fmt.Errorf("palavra-chave sem id, texto ou forma normalizada")
+		}
+		k.HouseholdID = householdID
+		k.CategoryID = categoryID
+		models = append(models, *toCategoryKeywordModel(&k))
+	}
+
+	var atual keywordTally
+	err := r.keywordScope(ctx, householdID).
+		Where("category_id = ?", categoryID).
+		Select(keywordTallyProjecao).
+		Scan(&atual).Error
+	if err != nil {
+		return fmt.Errorf("contando palavras-chave da categoria: %w", err)
+	}
+	if atual.Total+int64(len(models)) > category.MaxKeywordsPerOwner {
+		return category.ErrTooManyKeywords
+	}
+	for i := range models {
+		models[i].Position = atual.MaxPosition + 1 + i
+	}
+
+	if err := r.conn(ctx).CreateInBatches(&models, keywordBatchSize).Error; err != nil {
+		// Erro nativo não embrulhado: a mensagem do banco ecoa a palavra.
+		if storage.IsDuplicate(err) {
+			return category.ErrKeywordTaken
+		}
+		return fmt.Errorf("acrescentando palavras-chave de categoria: %w", err)
+	}
+	return nil
+}
+
 // DeleteKeywords apaga fisicamente as palavras-chave da categoria.
 func (r *CategoryRepository) DeleteKeywords(ctx context.Context, householdID, categoryID string) error {
 	if householdID == "" || categoryID == "" {

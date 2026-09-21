@@ -17,8 +17,12 @@ import (
 // category.Service, ligado em cmd/api/main.go.
 type Seeder interface {
 	// SeedDefaults roda DENTRO da transação que cria a casa. Não deve abrir
-	// transação própria, e precisa ser idempotente — EnsureDefault também roda
-	// como auto-reparo no login.
+	// transação própria.
+	//
+	// Roda UMA VEZ POR CASA, na criação: EnsureDefault devolve cedo quando o
+	// usuário já tem casa, então a semente NÃO é reaplicada a cada login. Ela
+	// ainda assim precisa ser idempotente, como defesa em profundidade — não
+	// porque haja um caminho conhecido que a chame duas vezes na mesma casa.
 	SeedDefaults(ctx context.Context, householdID string) error
 }
 

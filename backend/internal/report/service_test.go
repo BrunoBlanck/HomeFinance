@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brunorblanck/homefinance/backend/internal/account"
 	"github.com/brunorblanck/homefinance/backend/internal/category"
 	"github.com/brunorblanck/homefinance/backend/internal/platform/logging"
 	"github.com/brunorblanck/homefinance/backend/internal/report"
@@ -40,19 +41,65 @@ type chamadaLedger struct{ casa, mes, kind string }
 
 // ledgerFake devolve as linhas programadas e registra COM QUE ARGUMENTOS foi
 // chamado — é assim que o teste prova que a casa é a do token e que a
-// natureza foi conferida antes de chegar aqui.
+// natureza foi conferida antes de chegar aqui. Nenhum id de conta chega ao
+// ledger: o recorte é do serviço, e a assinatura registrada é a prova.
 type ledgerFake struct {
-	rows     []report.CategoryTotal
+	rows     []report.CategoryAccountTotal
 	err      error
 	chamadas []chamadaLedger
+	// semCopia entrega SEMPRE o mesmo array — o que um cache no repositório
+	// faria. É assim que se prova que o serviço não muta o que recebeu.
+	semCopia bool
 }
 
-func (l *ledgerFake) SumByCategory(_ context.Context, householdID, competenceMonth, kind string) ([]report.CategoryTotal, error) {
+func (l *ledgerFake) SumByCategoryAndAccount(_ context.Context, householdID, competenceMonth, kind string) ([]report.CategoryAccountTotal, error) {
 	l.chamadas = append(l.chamadas, chamadaLedger{householdID, competenceMonth, kind})
 	if l.err != nil {
 		return nil, l.err
 	}
-	return l.rows, nil
+	if l.semCopia {
+		return l.rows, nil
+	}
+	// Cópia deliberada, como o repositório real (que monta a fatia a cada
+	// chamada): o dublê não pode ser mais generoso do que a implementação de
+	// produção, senão um teste passaria por uma garantia que não existe.
+	return append([]report.CategoryAccountTotal(nil), l.rows...), nil
+}
+
+type chamadaContas struct {
+	casa            string
+	includeArchived bool
+}
+
+// accountsFake filtra por casa como o repositório real: conta de outra casa
+// NÃO é devolvida — e, se for (dublê deliberadamente furado num teste), o
+// serviço tem de reconferir.
+type accountsFake struct {
+	contas   []account.Account
+	err      error
+	chamadas []chamadaContas
+	// semFiltroDeCasa simula um repositório furado, que devolve contas de
+	// TODAS as casas: é o cenário em que a reconferência de casa do serviço é
+	// a única barreira.
+	semFiltroDeCasa bool
+}
+
+func (c *accountsFake) List(_ context.Context, householdID string, includeArchived bool) ([]account.Account, error) {
+	c.chamadas = append(c.chamadas, chamadaContas{householdID, includeArchived})
+	if c.err != nil {
+		return nil, c.err
+	}
+	var out []account.Account
+	for _, a := range c.contas {
+		if !c.semFiltroDeCasa && a.HouseholdID != householdID {
+			continue
+		}
+		if !includeArchived && a.ArchivedAt != nil {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 type chamadaCategorias struct {
@@ -89,6 +136,7 @@ func (c *categoriasFake) List(_ context.Context, householdID string, includeArch
 type ambiente struct {
 	ledger *ledgerFake
 	cats   *categoriasFake
+	contas *accountsFake
 	logs   *bytes.Buffer
 	svc    *report.Service
 }
@@ -97,9 +145,23 @@ func novoAmbiente(t *testing.T) *ambiente {
 	t.Helper()
 	logs := &bytes.Buffer{}
 	lg := logging.New(logs, logging.Options{Level: "debug", Format: "json"})
-	a := &ambiente{ledger: &ledgerFake{}, cats: &categoriasFake{}, logs: logs}
-	a.svc = report.NewService(a.ledger, a.cats, lg)
+	a := &ambiente{ledger: &ledgerFake{}, cats: &categoriasFake{}, contas: &accountsFake{}, logs: logs}
+	a.svc = report.NewService(a.ledger, a.cats, a.contas, lg)
 	return a
+}
+
+// conta cadastra uma conta no dublê, com o tipo pedido e arquivada ou não.
+func (a *ambiente) conta(casa, id, nome, kind string, arquivada bool) account.Account {
+	c := account.Account{
+		ID: id, HouseholdID: casa, Name: nome, NameNorm: textnorm.Normalize(nome), Kind: kind,
+		CreatedAt: arquivadaEm, UpdatedAt: arquivadaEm,
+	}
+	if arquivada {
+		at := arquivadaEm
+		c.ArchivedAt = &at
+	}
+	a.contas.contas = append(a.contas.contas, c)
+	return c
 }
 
 func (a *ambiente) categoria(casa, id, nome, kind string, parentID *string, arquivada bool) category.Category {
@@ -118,8 +180,17 @@ func (a *ambiente) categoria(casa, id, nome, kind string, parentID *string, arqu
 
 func ptr(s string) *string { return &s }
 
-func linha(id *string, cents, count int64) report.CategoryTotal {
-	return report.CategoryTotal{CategoryID: id, TotalCents: cents, Count: count}
+// contaPadrao é a conta das linhas que não são sobre recorte: sob "todas as
+// contas" a conta da linha é indiferente, e a maioria dos testes é sobre a
+// dobra.
+const contaPadrao = "conta-padrao"
+
+func linha(id *string, cents, count int64) report.CategoryAccountTotal {
+	return linhaConta(id, contaPadrao, cents, count)
+}
+
+func linhaConta(id *string, conta string, cents, count int64) report.CategoryAccountTotal {
+	return report.CategoryAccountTotal{CategoryID: id, AccountID: conta, TotalCents: cents, Count: count}
 }
 
 // conferirInvariantes é o critério de aceite 1 e 2 em uma função: totais e
@@ -215,7 +286,7 @@ func TestByCategoryArvoreFechaEmDoisNiveis(t *testing.T) {
 	// Grupo com filha cadastrada mas SEM lançamento: a filha não aparece.
 	a.categoria(minhaCasa, "f-cinema", "Cinema", category.KindExpense, ptr(lazer.ID), false)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(luz.ID), 30_000, 2),
 		linha(ptr(agua.ID), 10_000, 1),
 		linha(ptr(casa.ID), 5_000, 1), // direto no grupo
@@ -303,7 +374,7 @@ func TestByCategoryArquivadaContaComArchivedAt(t *testing.T) {
 
 	g := a.categoria(minhaCasa, "g-antiga", "Antiga", category.KindExpense, nil, true)
 	f := a.categoria(minhaCasa, "f-velha", "Velha", category.KindExpense, ptr(g.ID), true)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(f.ID), 1_000, 1), linha(ptr(g.ID), 500, 1)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(f.ID), 1_000, 1), linha(ptr(g.ID), 500, 1)}
 
 	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)
@@ -328,7 +399,7 @@ func TestByCategoryOrdenacaoDeterministica(t *testing.T) {
 	maior := a.categoria(minhaCasa, "g-m", "Maior", category.KindExpense, nil, false)
 	maisContas := a.categoria(minhaCasa, "g-c", "Mais contas", category.KindExpense, nil, false)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(zebra.ID), 1_000, 1),
 		linha(nil, 1_000, 1), // empate total com Zebra/Álfa/beta: vai por último
 		linha(ptr(alfa.ID), 1_000, 1),
@@ -362,7 +433,7 @@ func TestByCategoryValorZero(t *testing.T) {
 	h := a.categoria(minhaCasa, "g-cheia", "Cheia", category.KindExpense, nil, false)
 
 	t.Run("zero entre valores", func(t *testing.T) {
-		a.ledger.rows = []report.CategoryTotal{linha(ptr(g.ID), 0, 2), linha(ptr(h.ID), 1_000, 1)}
+		a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(g.ID), 0, 2), linha(ptr(h.ID), 1_000, 1)}
 		v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 		require.NoError(t, err)
 		conferirInvariantes(t, v)
@@ -376,7 +447,7 @@ func TestByCategoryValorZero(t *testing.T) {
 	})
 
 	t.Run("mês inteiro zerado", func(t *testing.T) {
-		a.ledger.rows = []report.CategoryTotal{linha(ptr(g.ID), 0, 2), linha(nil, 0, 1)}
+		a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(g.ID), 0, 2), linha(nil, 0, 1)}
 		v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 		require.NoError(t, err)
 		conferirInvariantes(t, v)
@@ -441,7 +512,7 @@ func TestByCategoryCategoriaDeOutraCasaCaiNoBalde(t *testing.T) {
 
 	alheia := a.categoria(outraCasa, "g-alheia", "Segredo Da Vizinha", category.KindExpense, nil, false)
 	minha := a.categoria(minhaCasa, "g-minha", "Minha", category.KindExpense, nil, false)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(alheia.ID), 777_777, 1), linha(ptr(minha.ID), 100, 1)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(alheia.ID), 777_777, 1), linha(ptr(minha.ID), 100, 1)}
 
 	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)
@@ -466,7 +537,7 @@ func TestByCategoryFilhaSemPaiVuraGrupo(t *testing.T) {
 	a := novoAmbiente(t)
 
 	orfa := a.categoria(minhaCasa, "f-solta", "Órfã", category.KindExpense, ptr("g-inexistente"), false)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(orfa.ID), 4_200, 2)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(orfa.ID), 4_200, 2)}
 
 	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)
@@ -497,7 +568,7 @@ func TestByCategoryAvisoDeAnomaliaEhUmSoPorRequisicao(t *testing.T) {
 	a := novoAmbiente(t)
 
 	const desconhecidas, orfas = 9, 7
-	var rows []report.CategoryTotal
+	var rows []report.CategoryAccountTotal
 	for i := 0; i < desconhecidas; i++ {
 		rows = append(rows, linha(ptr(fmt.Sprintf("sumida-%02d", i)), 1_000, 1))
 	}
@@ -545,7 +616,7 @@ func TestByCategoryAmostraDeAnomaliaNaoRepeteID(t *testing.T) {
 	t.Parallel()
 	a := novoAmbiente(t)
 
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr("sumida"), 100, 1),
 		linha(ptr("sumida"), 200, 1),
 		linha(ptr("sumida"), 300, 1),
@@ -566,22 +637,28 @@ func TestByCategorySemAnomaliaNaoAvisa(t *testing.T) {
 	a := novoAmbiente(t)
 
 	g := a.categoria(minhaCasa, "g-1", "Mercado", category.KindExpense, nil, false)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(g.ID), 1_000, 1), linha(nil, 500, 1)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(g.ID), 1_000, 1), linha(nil, 500, 1)}
 
 	_, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)
 	assert.NotContains(t, a.logs.String(), `"level":"WARN"`)
 }
 
-// Critério 13: mais linhas do que a taxonomia permite é erro interno (500),
-// não de validação, e as categorias nem são consultadas.
+// tetoDeLinhas é o teto ESTRUTURAL da agregação por (categoria, conta)
+// (ADR-032): (categorias + a linha nula) × contas da casa = 201 × 50.
+const tetoDeLinhas = (category.MaxPerHousehold + 1) * account.MaxPerHousehold
+
+// Critério 13: mais linhas do que a estrutura permite é erro interno (500),
+// não de validação, e as categorias nem são consultadas. O teto é o REAL
+// (categoria e conta com lançamento não podem ser excluídas), e não o antigo
+// de 201 — com o recorte, 201 categorias × 50 contas é um mês legítimo.
 func TestByCategoryLinhasDemaisEhErroInterno(t *testing.T) {
 	t.Parallel()
 	a := novoAmbiente(t)
 
-	rows := make([]report.CategoryTotal, 0, category.MaxPerHousehold+2)
-	for i := 0; i < category.MaxPerHousehold+2; i++ {
-		rows = append(rows, linha(ptr(fmt.Sprintf("c-%03d", i)), 100, 1))
+	rows := make([]report.CategoryAccountTotal, 0, tetoDeLinhas+1)
+	for i := 0; i < tetoDeLinhas+1; i++ {
+		rows = append(rows, linha(ptr(fmt.Sprintf("c-%05d", i)), 100, 1))
 	}
 	a.ledger.rows = rows
 
@@ -590,29 +667,64 @@ func TestByCategoryLinhasDemaisEhErroInterno(t *testing.T) {
 	assert.False(t, transaction.IsValidationError(err), "não é culpa de quem pediu")
 	assert.NotErrorIs(t, err, report.ErrInvalidKind)
 	assert.NotErrorIs(t, err, report.ErrUnauthenticated)
-	assert.Contains(t, err.Error(), "202 linhas", "a contagem vai no erro (e daí ao log)")
+	assert.Contains(t, err.Error(), "10051 linhas", "a contagem vai no erro (e daí ao log)")
 	assert.Empty(t, a.cats.chamadas)
+	assert.Empty(t, a.contas.chamadas, "o teto é conferido antes de qualquer outra leitura")
 }
 
-// Exatamente MaxPerHousehold + 1 linhas (todas as categorias + a nula) é o
-// teto e passa.
+// Exatamente o teto passa — nas duas formas: MaxPerHousehold + 1 categorias
+// numa conta só (o teto antigo, que continua sendo um mês comum), e as
+// mesmas 201 categorias em TODAS as 50 contas (o teto novo, 10 050 linhas),
+// que a dobra tem de somar de volta em 201 itens.
 func TestByCategoryNoTetoDeLinhasPassa(t *testing.T) {
 	t.Parallel()
-	a := novoAmbiente(t)
 
-	rows := make([]report.CategoryTotal, 0, category.MaxPerHousehold+1)
-	for i := 0; i < category.MaxPerHousehold; i++ {
-		id := fmt.Sprintf("c-%03d", i)
-		a.categoria(minhaCasa, id, "Cat "+id, category.KindExpense, nil, false)
-		rows = append(rows, linha(ptr(id), int64(i+1), 1))
-	}
-	rows = append(rows, linha(nil, 1, 1))
-	a.ledger.rows = rows
+	t.Run("201 categorias numa conta", func(t *testing.T) {
+		t.Parallel()
+		a := novoAmbiente(t)
+		rows := make([]report.CategoryAccountTotal, 0, category.MaxPerHousehold+1)
+		for i := 0; i < category.MaxPerHousehold; i++ {
+			id := fmt.Sprintf("c-%03d", i)
+			a.categoria(minhaCasa, id, "Cat "+id, category.KindExpense, nil, false)
+			rows = append(rows, linha(ptr(id), int64(i+1), 1))
+		}
+		rows = append(rows, linha(nil, 1, 1))
+		a.ledger.rows = rows
 
-	v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
-	require.NoError(t, err)
-	conferirInvariantes(t, v)
-	assert.Len(t, v.Items, category.MaxPerHousehold+1)
+		v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
+		require.NoError(t, err)
+		conferirInvariantes(t, v)
+		assert.Len(t, v.Items, category.MaxPerHousehold+1)
+	})
+
+	t.Run("201 categorias em 50 contas", func(t *testing.T) {
+		t.Parallel()
+		a := novoAmbiente(t)
+		rows := make([]report.CategoryAccountTotal, 0, tetoDeLinhas)
+		var esperado int64
+		for c := 0; c < account.MaxPerHousehold; c++ {
+			conta := fmt.Sprintf("conta-%02d", c)
+			for i := 0; i < category.MaxPerHousehold; i++ {
+				id := fmt.Sprintf("c-%03d", i)
+				if c == 0 {
+					a.categoria(minhaCasa, id, "Cat "+id, category.KindExpense, nil, false)
+				}
+				rows = append(rows, linhaConta(ptr(id), conta, int64(i+1), 1))
+				esperado += int64(i + 1)
+			}
+			rows = append(rows, linhaConta(nil, conta, 1, 1))
+			esperado++
+		}
+		require.Len(t, rows, tetoDeLinhas)
+		a.ledger.rows = rows
+
+		v, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
+		require.NoError(t, err)
+		conferirInvariantes(t, v)
+		assert.Len(t, v.Items, category.MaxPerHousehold+1, "as 50 linhas de cada categoria viram UM item")
+		assert.Equal(t, esperado, v.TotalCents)
+		assert.Equal(t, int64(tetoDeLinhas), v.Count)
+	})
 }
 
 // Erros de infraestrutura sobem embrulhados, com contexto, e sem virar erro
@@ -631,7 +743,7 @@ func TestByCategoryPropagaErroDeInfra(t *testing.T) {
 
 	t.Run("categorias", func(t *testing.T) {
 		a := novoAmbiente(t)
-		a.ledger.rows = []report.CategoryTotal{linha(nil, 1, 1)}
+		a.ledger.rows = []report.CategoryAccountTotal{linha(nil, 1, 1)}
 		a.cats.err = errors.New("banco fora")
 		_, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 		require.Error(t, err)
@@ -646,7 +758,7 @@ func TestByCategoryTotalEstouradoEhErroInterno(t *testing.T) {
 
 	g1 := a.categoria(minhaCasa, "g-1", "Um", category.KindExpense, nil, false)
 	g2 := a.categoria(minhaCasa, "g-2", "Dois", category.KindExpense, nil, false)
-	a.ledger.rows = []report.CategoryTotal{linha(ptr(g1.ID), math.MaxInt64, 1), linha(ptr(g2.ID), 1, 1)}
+	a.ledger.rows = []report.CategoryAccountTotal{linha(ptr(g1.ID), math.MaxInt64, 1), linha(ptr(g2.ID), 1, 1)}
 
 	assert.NotPanics(t, func() {
 		_, err := a.svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
@@ -663,7 +775,7 @@ func TestByCategoryTotalEstouradoEhErroInterno(t *testing.T) {
 func TestByCategoryParcelaNegativaEhErroInterno(t *testing.T) {
 	t.Parallel()
 
-	casos := map[string][]report.CategoryTotal{
+	casos := map[string][]report.CategoryAccountTotal{
 		"centavos negativos no grupo": {linha(ptr("g-1"), -1, 1)},
 		"centavos negativos na filha": {linha(ptr("g-1"), 10, 1), linha(ptr("f-1"), -1, 1)},
 		"contagem negativa no grupo":  {linha(ptr("g-1"), 10, -1)},
@@ -696,7 +808,7 @@ func TestByCategoryLinhasRepetidasSomam(t *testing.T) {
 
 	g := a.categoria(minhaCasa, "g", "Grupo", category.KindExpense, nil, false)
 	f := a.categoria(minhaCasa, "f", "Filha", category.KindExpense, ptr(g.ID), false)
-	a.ledger.rows = []report.CategoryTotal{
+	a.ledger.rows = []report.CategoryAccountTotal{
 		linha(ptr(f.ID), 100, 1), linha(ptr(f.ID), 200, 2),
 		linha(ptr(g.ID), 10, 1), linha(ptr(g.ID), 20, 1),
 		linha(nil, 1, 1), linha(nil, 2, 1),
@@ -723,7 +835,7 @@ func TestByCategoryPropriedades(t *testing.T) {
 	for iter := 0; iter < 300; iter++ {
 		a := novoAmbiente(t)
 		nGrupos := 1 + rng.IntN(12)
-		var rows []report.CategoryTotal
+		var rows []report.CategoryAccountTotal
 		for g := 0; g < nGrupos; g++ {
 			gid := fmt.Sprintf("g-%d", g)
 			a.categoria(minhaCasa, gid, fmt.Sprintf("Grupo %d", rng.IntN(5)), category.KindExpense, nil, rng.IntN(5) == 0)
@@ -761,7 +873,7 @@ func TestByCategoryPropriedades(t *testing.T) {
 // Logger nulo não derruba nada: cai no slog.Default.
 func TestNewServiceAceitaLoggerNulo(t *testing.T) {
 	t.Parallel()
-	svc := report.NewService(&ledgerFake{}, &categoriasFake{}, nil)
+	svc := report.NewService(&ledgerFake{}, &categoriasFake{}, &accountsFake{}, nil)
 	v, err := svc.ByCategory(t.Context(), ator(minhaCasa), report.ByCategoryInput{Month: "2026-09"})
 	require.NoError(t, err)
 	assert.Empty(t, v.Items)

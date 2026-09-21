@@ -3,6 +3,7 @@ import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DashboardSummary } from '@/api/types'
 import { createAppRouter } from '@/app/router'
 
 const fetchMock = vi.fn()
@@ -33,6 +34,18 @@ const SESSAO = {
   ],
 }
 
+const RESUMO: DashboardSummary = {
+  month: '2026-09',
+  incomeCents: 500_000,
+  incomeCount: 3,
+  creditCardExpenseCents: 80_000,
+  creditCardExpenseCount: 2,
+  investmentNetCents: 165_000,
+  investmentCount: 2,
+  creditCardAccountCount: 1,
+  investmentCategoryCount: 2,
+}
+
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -40,8 +53,28 @@ function jsonResponse(status: number, body: unknown) {
   })
 }
 
-function renderApp() {
-  const router = createAppRouter(createMemoryHistory({ initialEntries: ['/'] }))
+/** Roteador da API do teste. `sessao` e `painel` são declarados à parte porque
+ *  os casos interessantes desta tela são justamente aqueles em que um dos dois
+ *  falha e o outro não. */
+function rotearApi(
+  sessao: () => Response,
+  painel: () => Response = () => jsonResponse(200, RESUMO),
+) {
+  fetchMock.mockImplementation((entrada: string) => {
+    const url = new URL(String(entrada), 'https://app.invalido')
+    const caminho = url.pathname.replace('/api/v1', '')
+    if (caminho === '/me') return Promise.resolve(sessao())
+    if (caminho === '/dashboard') return Promise.resolve(painel())
+    throw new Error(`rota não declarada no teste: ${url.pathname}${url.search}`)
+  })
+}
+
+function comSessao() {
+  rotearApi(() => jsonResponse(200, SESSAO))
+}
+
+function renderApp(caminho = '/?mes=2026-09') {
+  const router = createAppRouter(createMemoryHistory({ initialEntries: [caminho] }))
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -67,13 +100,16 @@ describe('HomeScreen', () => {
   })
 
   it('busca a sessão em /me com o cookie e saúda pelo primeiro nome', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+    comSessao()
     renderApp()
 
     expect(await screen.findByRole('heading', { name: 'Olá, Bruno.' })).toBeInTheDocument()
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/v1/me')
+    // Pela ROTA, e não pela ordem: desde a spec 0008 a tela também pede o
+    // resumo do mês, e as duas queries partem juntas.
+    const chamada = fetchMock.mock.calls.find((c) => String(c[0]) === '/api/v1/me')
+    expect(chamada).toBeDefined()
+    const [, init] = chamada as [string, RequestInit]
     expect(init.credentials).toBe('include')
   })
 
@@ -92,27 +128,30 @@ describe('HomeScreen', () => {
   })
 
   it('põe o foco no título ao abrir, para o teclado começar no conteúdo', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+    comSessao()
     renderApp()
 
     const titulo = await screen.findByRole('heading', { name: 'Olá, Bruno.' })
     await waitFor(() => expect(titulo).toHaveFocus())
   })
 
+  /** É `Painel`, e não `Início`: é o nome do item de menu e o padrão das
+   *  outras telas — a aba do navegador tem de dizer onde a pessoa está com a
+   *  mesma palavra que a navegação usou. */
   it('define o título do documento', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+    comSessao()
     renderApp()
 
     await screen.findByRole('heading', { name: 'Olá, Bruno.' })
-    expect(document.title).toBe('Início · HomeFinance')
+    expect(document.title).toBe('Painel · HomeFinance')
   })
 
   it('mostra a casa e o menu da conta no cabeçalho', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+    comSessao()
     renderApp()
 
     expect(await screen.findByText('Casa de Bruno')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Conta de Bruno Blanck' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Menu de Bruno Blanck' })).toBeInTheDocument()
   })
 
   it('manda para o login quando a sessão venceu (401), sem mostrar erro', async () => {
@@ -121,12 +160,13 @@ describe('HomeScreen', () => {
 
     expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/entrar')
-    // 401 é fim de sessão, não defeito: nada de alarme vermelho na saída.
+    // 401 é fim de sessão, não defeito: nada de alarme vermelho na saída — nem
+    // o da casca, nem o da faixa.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('oferece "tentar de novo" quando a falha não é de sessão', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(500, { error: { code: 'INTERNAL_ERROR' } }))
+    rotearApi(() => jsonResponse(500, { error: { code: 'INTERNAL_ERROR' } }))
     const router = renderApp()
 
     expect(await screen.findByText('Não foi possível carregar sua conta.')).toBeInTheDocument()
@@ -137,39 +177,43 @@ describe('HomeScreen', () => {
 
   it('recarrega a sessão ao clicar em "tentar de novo"', async () => {
     const user = userEvent.setup()
-    fetchMock.mockResolvedValueOnce(jsonResponse(500, { error: { code: 'INTERNAL_ERROR' } }))
+    let falhar = true
+    rotearApi(() =>
+      falhar ? jsonResponse(500, { error: { code: 'INTERNAL_ERROR' } }) : jsonResponse(200, SESSAO),
+    )
     renderApp()
 
     await screen.findByRole('button', { name: 'Tentar de novo' })
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+    falhar = false
     await user.click(screen.getByRole('button', { name: 'Tentar de novo' }))
 
     expect(await screen.findByRole('heading', { name: 'Olá, Bruno.' })).toBeInTheDocument()
   })
 
-  it('é honesta sobre o que ainda não existe em vez de fingir dados', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
+  /** O painel responde com NÚMEROS, e o placeholder foi apagado — não
+   *  comentado, não escondido por CSS.
+   *
+   *  A tela acaba na faixa, e é para acabar: saldo por conta, vencimentos e top
+   *  categorias são a E4 completa. Nenhuma moldura vazia prometendo o futuro. */
+  it('mostra o resumo do mês, e nada de placeholder nem de "em breve"', async () => {
+    comSessao()
     renderApp()
 
-    await screen.findByRole('heading', { name: 'Olá, Bruno.' })
-    expect(screen.getByText('Seu caderno está em branco.')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Já funciona' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'A seguir' })).toBeInTheDocument()
-    expect(screen.getByText('Lançamentos do mês')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Resumo de setembro' }),
+    ).toBeVisible()
+    expect(screen.getByText('Receita do mês')).toBeVisible()
+
+    expect(screen.queryByText('Seu caderno está em branco.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Onde o projeto está' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Já funciona' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'A seguir' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/em breve/i)).not.toBeInTheDocument()
   })
 
   it('exibe o aviso que vem do fluxo anterior pelo state do roteador', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, SESSAO))
-    const history = createMemoryHistory({ initialEntries: ['/'] })
-    const router = createAppRouter(history)
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
-    )
+    comSessao()
+    const router = renderApp()
     await screen.findByRole('heading', { name: 'Olá, Bruno.' })
 
     await router.navigate({
